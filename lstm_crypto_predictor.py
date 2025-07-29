@@ -9,6 +9,46 @@ import matplotlib.pyplot as plt
 import os
 
 # ---------------------------
+# Technical Indicators
+# ---------------------------
+def add_technical_indicators(df):
+    # Relative Strength Index (RSI)
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+
+    # Moving Average Convergence Divergence (MACD)
+    ema12 = df['close'].ewm(span=12, adjust=False).mean()
+    ema26 = df['close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = ema12 - ema26
+    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+
+    # Bollinger Bands
+    df['MA20'] = df['close'].rolling(window=20).mean()
+    df['BB_Upper'] = df['MA20'] + (df['close'].rolling(window=20).std() * 2)
+    df['BB_Lower'] = df['MA20'] - (df['close'].rolling(window=20).std() * 2)
+
+    # Exponential Moving Averages
+    df['EMA10'] = df['close'].ewm(span=10, adjust=False).mean()
+    df['EMA50'] = df['close'].ewm(span=50, adjust=False).mean()
+
+    # Moving Averages
+    df['SMA10'] = df['close'].rolling(window=10).mean()
+    df['SMA50'] = df['close'].rolling(window=50).mean()
+
+    # Momentum
+    df['Momentum'] = df['close'] - df['close'].shift(10)
+
+    # Volume Weighted Average Price (VWAP)
+    df['VWAP'] = (df['volume'] * (df['high'] + df['low'] + df['close']) / 3).cumsum() / df['volume'].cumsum()
+
+    # Drop NaN values resulting from indicator calculations
+    df = df.dropna().reset_index(drop=True)
+    return df
+
+# ---------------------------
 # Data Loading & Preprocessing
 # ---------------------------
 def load_data(filepath, n_hours=24):
@@ -30,10 +70,17 @@ def load_data(filepath, n_hours=24):
     # Sort by date
     df = df.sort_values('date').reset_index(drop=True)
     df = df.dropna(subset=required_cols)
-    # Normalize price and volume
+    
+    # Add technical indicators
+    df = add_technical_indicators(df)
+    
+    # Normalize price, volume, and technical indicators
     scaler = MinMaxScaler()
-    features = df[['open', 'high', 'low', 'close', 'volume']].values
+    feature_cols = ['open', 'high', 'low', 'close', 'volume', 'RSI', 'MACD', 'MACD_Signal',
+                   'BB_Upper', 'BB_Lower', 'EMA10', 'EMA50', 'SMA10', 'SMA50', 'Momentum', 'VWAP']
+    features = df[feature_cols].values
     features_scaled = scaler.fit_transform(features)
+    
     # Generate sliding window samples and labels
     X, y = [], []
     for i in range(len(df) - n_hours - 1):
@@ -41,7 +88,7 @@ def load_data(filepath, n_hours=24):
         # Label: next hour close >1% than current close
         close_now = df['close'].iloc[i+n_hours-1]
         close_next = df['close'].iloc[i+n_hours]
-        label = 1 if (close_next - close_now) / close_now > 0.01 else 0
+        label = 1 if (close_next - close_now) / close_now > 0.005 else 0  # Relaxed to >0.5%
         X.append(window)
         y.append(label)
     X = np.array(X, dtype=np.float32)
@@ -76,7 +123,7 @@ class CryptoDataset(Dataset):
 # LSTM Model
 # ---------------------------
 class LSTMClassifier(nn.Module):
-    def __init__(self, input_size=5, hidden_size=64, num_layers=2):
+    def __init__(self, input_size=16, hidden_size=64, num_layers=2):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_size, 1)
@@ -159,7 +206,7 @@ def evaluate_model(model, loader, device, verbose=True):
 # ---------------------------
 # Backtest Function
 # ---------------------------
-def backtest(model, loader, device, threshold=0.8):
+def backtest(model, loader, device, threshold=0.5):
     model.eval()
     n_signals = 0
     n_wins = 0
@@ -231,7 +278,7 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     # 3. Build model
-    model = LSTMClassifier(input_size=5, hidden_size=64, num_layers=2).to(device)
+    model = LSTMClassifier(input_size=16, hidden_size=64, num_layers=2).to(device)
 
     # Print total and per-layer parameter count
     total_params = sum(p.numel() for p in model.parameters())
