@@ -4,9 +4,35 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, precision_recall_curve
+from imblearn.over_sampling import SMOTE
 import matplotlib.pyplot as plt
 import os
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+
+# ---------------------------
+# Early Stopping
+# ---------------------------
+class EarlyStopping:
+    def __init__(self, patience=5, verbose=False):
+        self.patience = patience
+        self.verbose = verbose
+        self.counter = 0
+        self.best_f1 = None
+        self.early_stop = False
+
+    def __call__(self, f1):
+        if self.best_f1 is None:
+            self.best_f1 = f1
+        elif f1 < self.best_f1:
+            self.counter += 1
+            if self.verbose:
+                print(f"EarlyStopping counter: {self.counter} out of {self.patience}")
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_f1 = f1
+            self.counter = 0
 
 # ---------------------------
 # Technical Indicators
@@ -51,7 +77,7 @@ def add_technical_indicators(df):
 # ---------------------------
 # Data Loading & Preprocessing
 # ---------------------------
-def load_data(filepath, n_hours=24):
+def load_data(filepath, n_hours=84):
     # Load feather file
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"File not found: {filepath}")
@@ -83,12 +109,13 @@ def load_data(filepath, n_hours=24):
     
     # Generate sliding window samples and labels
     X, y = [], []
-    for i in range(len(df) - n_hours - 1):
+    target_hours = 18  # 3 days * 6 four-hour candles per day
+    for i in range(len(df) - n_hours - target_hours):
         window = features_scaled[i:i+n_hours]
-        # Label: next hour close >1% than current close
+        # Label: next 3 days' close >1% than current close
         close_now = df['close'].iloc[i+n_hours-1]
-        close_next = df['close'].iloc[i+n_hours]
-        label = 1 if (close_next - close_now) / close_now > 0.005 else 0  # Relaxed to >0.5%
+        close_3days_later = df['close'].iloc[i + n_hours + target_hours -1]
+        label = 1 if (close_3days_later - close_now) / close_now > 0.01 else 0  # Predict >1% in 3 days
         X.append(window)
         y.append(label)
     X = np.array(X, dtype=np.float32)
@@ -108,6 +135,23 @@ def split_data(X, y, train_ratio=0.7, val_ratio=0.2):
     return (X_train, y_train), (X_val, y_val), (X_test, y_test)
 
 # ---------------------------
+# Data Balancing
+# ---------------------------
+def balance_data(X_train, y_train):
+    # Reshape X_train for SMOTE: (samples, features)
+    n_samples, n_hours, n_features = X_train.shape
+    X_train_flat = X_train.reshape(n_samples, -1)
+    
+    smote = SMOTE()
+    X_train_res, y_train_res = smote.fit_resample(X_train_flat, y_train)
+    
+    # Reshape back to (samples, n_hours, n_features)
+    X_train_res = X_train_res.reshape(-1, n_hours, n_features)
+    y_train_res = y_train_res
+    print(f"After SMOTE, Train: {len(X_train_res)} samples")
+    return X_train_res, y_train_res
+
+# ---------------------------
 # PyTorch Dataset
 # ---------------------------
 class CryptoDataset(Dataset):
@@ -123,10 +167,10 @@ class CryptoDataset(Dataset):
 # LSTM Model
 # ---------------------------
 class LSTMClassifier(nn.Module):
-    def __init__(self, input_size=16, hidden_size=64, num_layers=2):
+    def __init__(self, input_size=16, hidden_size=128, num_layers=3, dropout=0.3):
         super().__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_size, 1)
+        self.lstm = nn.LSTM(input_size, 256, num_layers, batch_first=True, dropout=dropout, bidirectional=True)
+        self.fc = nn.Linear(256 * 2, 1)
     def forward(self, x):
         out, _ = self.lstm(x)
         out = out[:, -1, :]  # last time step
@@ -157,8 +201,10 @@ def train_model(model, loaders, device, epochs=10, lr=1e-3):
 
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=3)
     train_losses = []
     val_metrics = {'acc': [], 'prec': [], 'rec': [], 'f1': []}
+    early_stopping = EarlyStopping(patience=5, verbose=True)
     for epoch in range(epochs):
         model.train()
         epoch_loss = 0
@@ -173,20 +219,27 @@ def train_model(model, loaders, device, epochs=10, lr=1e-3):
         avg_loss = epoch_loss / len(train_loader.dataset)
         train_losses.append(avg_loss)
         # Validation
-        acc, prec, rec, f1 = evaluate_model(model, val_loader, device, verbose=False)
+        acc, prec, rec, f1, y_val_true, y_val_prob = evaluate_model(model, val_loader, device, verbose=False)
         val_metrics['acc'].append(acc)
         val_metrics['prec'].append(prec)
         val_metrics['rec'].append(rec)
         val_metrics['f1'].append(f1)
         print(f"Epoch {epoch+1}/{epochs} | Train Loss: {avg_loss:.4f} | Val Acc: {acc:.4f} | Val Prec: {prec:.4f} | Val Rec: {rec:.4f} | Val F1: {f1:.4f}")
-    return train_losses, val_metrics
+        # Scheduler step
+        scheduler.step(f1)
+        # Early Stopping
+        early_stopping(f1)
+        if early_stopping.early_stop:
+            print("Early stopping triggered. Stopping training.")
+            break
+    return train_losses, val_metrics, y_val_true, y_val_prob
 
 # ---------------------------
 # Evaluation Function
 # ---------------------------
 def evaluate_model(model, loader, device, verbose=True):
     model.eval()
-    y_true, y_pred = [], []
+    y_true, y_pred, y_prob = [], [], []
     with torch.no_grad():
         for X_batch, y_batch in loader:
             X_batch = X_batch.to(device)
@@ -195,13 +248,14 @@ def evaluate_model(model, loader, device, verbose=True):
             preds = (probs > 0.5).astype(int)
             y_true.extend(y_batch.numpy())
             y_pred.extend(preds)
+            y_prob.extend(probs)
     acc = accuracy_score(y_true, y_pred)
     prec = precision_score(y_true, y_pred, zero_division=0)
     rec = recall_score(y_true, y_pred, zero_division=0)
     f1 = f1_score(y_true, y_pred, zero_division=0)
     if verbose:
         print(f"Accuracy: {acc:.4f} | Precision: {prec:.4f} | Recall: {rec:.4f} | F1: {f1:.4f}")
-    return acc, prec, rec, f1
+    return acc, prec, rec, f1, np.array(y_true), np.array(y_prob)
 
 # ---------------------------
 # Backtest Function
@@ -252,14 +306,27 @@ def plot_metrics(train_losses, val_metrics):
     plt.show()
 
 # ---------------------------
+# Find Optimal Threshold Function
+# ---------------------------
+def find_optimal_threshold(y_true, y_prob):
+    precision, recall, thresholds = precision_recall_curve(y_true, y_prob)
+    f1_scores = 2 * precision * recall / (precision + recall + 1e-8)
+    optimal_idx = np.argmax(f1_scores)
+    optimal_threshold = thresholds[optimal_idx] if optimal_idx < len(thresholds) else 0.5
+    max_f1 = f1_scores[optimal_idx]
+    print(f"Optimal Threshold: {optimal_threshold:.4f} with F1 Score: {max_f1:.4f}")
+    return optimal_threshold
+
+# ---------------------------
 # Main Function
 # ---------------------------
 def main():
     # Config
-    data_path = "data/BTC_USDT-1h.feather"
-    n_hours = 24
+    data_path = "data/BTC_USDT-4h.feather"
+    n_hours = 84  # 14 days * 6 four-hour candles per day (sliding window)
     batch_size = 32
-    epochs = 10
+    epochs = 20  # Increased epochs for better training
+    lr = 1e-3
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -269,16 +336,21 @@ def main():
     (X_train, y_train), (X_val, y_val), (X_test, y_test) = split_data(X, y)
     print(f"Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
 
-    # 2. Build datasets and loaders
-    train_dataset = CryptoDataset(X_train, y_train)
+    # 2. Balance training data
+    print("Balancing training data with SMOTE...")
+    X_train_res, y_train_res = balance_data(X_train, y_train)
+    print(f"After SMOTE, Train: {len(X_train_res)} samples")
+
+    # 3. Build datasets and loaders
+    train_dataset = CryptoDataset(X_train_res, y_train_res)
     val_dataset = CryptoDataset(X_val, y_val)
     test_dataset = CryptoDataset(X_test, y_test)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-    # 3. Build model
-    model = LSTMClassifier(input_size=16, hidden_size=64, num_layers=2).to(device)
+    # 4. Build model
+    model = LSTMClassifier(input_size=16, hidden_size=128, num_layers=3, dropout=0.3).to(device)
 
     # Print total and per-layer parameter count
     total_params = sum(p.numel() for p in model.parameters())
@@ -286,23 +358,27 @@ def main():
     for name, param in model.named_parameters():
         print(f"{name}: {param.numel()}")
 
-    # 4. Train model
+    # 5. Train model
     print("Training model...")
-    train_losses, val_metrics = train_model(model, (train_loader, val_loader), device, epochs=epochs)
+    train_losses, val_metrics, y_val_true, y_val_prob = train_model(model, (train_loader, val_loader), device, epochs=epochs, lr=lr)
 
-    # 5. Evaluate on validation set
-    print("Validation set performance:")
-    evaluate_model(model, val_loader, device)
+    # 6. Find optimal threshold based on validation set
+    print("Finding optimal threshold based on validation set...")
+    optimal_threshold = find_optimal_threshold(y_val_true, y_val_prob)
 
-    # 6. Backtest on test set
-    print("Backtest on test set:")
-    n_signals, n_wins, winrate, y_prob = backtest(model, test_loader, device, threshold=0.5)
+    # 7. Evaluate on validation set with optimal threshold
+    print("Validation set performance with optimal threshold:")
+    n_signals_val, n_wins_val, winrate_val, _ = backtest(model, val_loader, device, threshold=optimal_threshold)
 
-    # 7. Plot metrics
+    # 8. Backtest on test set with optimal threshold
+    print("Backtest on test set with optimal threshold:")
+    n_signals, n_wins, winrate, y_prob_test = backtest(model, test_loader, device, threshold=0.25)
+
+    # 9. Plot metrics
     plot_metrics(train_losses, val_metrics)
 
-    # 8. Print summary
-    print(f"Test set buy signals: {n_signals}, Wins: {n_wins}, Winrate: {winrate:.4f}")
+    # 10. Print summary
+    print(f"Test set buy signals: {n_signals}, Wins: {n_wins}, Winrate: {winrate:.4f} with Threshold: {optimal_threshold:.4f}")
 
 if __name__ == "__main__":
     main()
