@@ -8,6 +8,21 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from imblearn.over_sampling import SMOTE
 import matplotlib.pyplot as plt
 import os
+
+# ---------------------------
+# 超参数配置（便于统一调整）
+# ---------------------------
+DATA_PATH = "data/BTC_USDT-4h.feather"  # 数据文件路径
+N_HOURS = 84        # 输入窗口长度（蜡烛的个数）
+BATCH_SIZE = 32     # 批大小，一般64或32，更大会快但内存消耗大 太大可能影响模型收敛效果
+EPOCHS = 50         # 训练轮数
+LEARNING_RATE = 1e-3  # 学习率
+
+# LSTM模型结构参数
+LSTM_INPUT_SIZE = 16    # 输入特征数（一般不用改）
+LSTM_HIDDEN_SIZE = 128  # LSTM隐藏单元数
+LSTM_NUM_LAYERS = 3     # LSTM层数
+LSTM_DROPOUT = 0.3      # Dropout比例
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # ---------------------------
@@ -109,13 +124,12 @@ def load_data(filepath, n_hours=84):
     
     # Generate sliding window samples and labels
     X, y = [], []
-    target_hours = 18  # 3 days * 6 four-hour candles per day
-    for i in range(len(df) - n_hours - target_hours):
+    for i in range(len(df) - n_hours - 1):
         window = features_scaled[i:i+n_hours]
-        # Label: next 3 days' close >1% than current close
+        # Label: next hour close >0.25% than current close
         close_now = df['close'].iloc[i+n_hours-1]
-        close_3days_later = df['close'].iloc[i + n_hours + target_hours -1]
-        label = 1 if (close_3days_later - close_now) / close_now > 0.01 else 0  # Predict >1% in 3 days
+        close_next = df['close'].iloc[i+n_hours] # 预测下一根蜡烛线
+        label = 1 if (close_next - close_now) / close_now > 0.01 else 0  # Predicts >1% increase
         X.append(window)
         y.append(label)
     X = np.array(X, dtype=np.float32)
@@ -167,7 +181,7 @@ class CryptoDataset(Dataset):
 # LSTM Model
 # ---------------------------
 class LSTMClassifier(nn.Module):
-    def __init__(self, input_size=16, hidden_size=128, num_layers=3, dropout=0.3):
+    def __init__(self, input_size=LSTM_INPUT_SIZE, hidden_size=LSTM_HIDDEN_SIZE, num_layers=LSTM_NUM_LAYERS, dropout=LSTM_DROPOUT):
         super().__init__()
         self.lstm = nn.LSTM(input_size, 256, num_layers, batch_first=True, dropout=dropout, bidirectional=True)
         self.fc = nn.Linear(256 * 2, 1)
@@ -322,11 +336,11 @@ def find_optimal_threshold(y_true, y_prob):
 # ---------------------------
 def main():
     # Config
-    data_path = "data/BTC_USDT-4h.feather"
-    n_hours = 84  # 14 days * 6 four-hour candles per day (sliding window)
-    batch_size = 32
-    epochs = 20  # Increased epochs for better training
-    lr = 1e-3
+    data_path = DATA_PATH
+    n_hours = N_HOURS
+    batch_size = BATCH_SIZE
+    epochs = EPOCHS
+    lr = LEARNING_RATE
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -350,7 +364,12 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     # 4. Build model
-    model = LSTMClassifier(input_size=16, hidden_size=128, num_layers=3, dropout=0.3).to(device)
+    model = LSTMClassifier(
+        input_size=LSTM_INPUT_SIZE,
+        hidden_size=LSTM_HIDDEN_SIZE,
+        num_layers=LSTM_NUM_LAYERS,
+        dropout=LSTM_DROPOUT
+    ).to(device)
 
     # Print total and per-layer parameter count
     total_params = sum(p.numel() for p in model.parameters())
