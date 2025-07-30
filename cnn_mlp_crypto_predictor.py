@@ -65,7 +65,7 @@ def add_technical_indicators(data):
     data = data.dropna().reset_index(drop=True)
     return data
 
-def preprocess_data(data, seq_len=48, prediction_horizon=4):
+def preprocess_data(data, seq_len=24, prediction_horizon=2):
     """
     Improved preprocessing with better feature engineering and target definition.
     """
@@ -79,8 +79,8 @@ def preprocess_data(data, seq_len=48, prediction_horizon=4):
                'bb_high', 'bb_low', 'bb_mid', 'bb_width',
                'volume_sma', 'volume_ratio', 'price_position']
     
-    # Use StandardScaler instead of MinMaxScaler for better gradient flow
-    scaler = StandardScaler()
+    # Use MinMaxScaler for bounded outputs that work better with sigmoid
+    scaler = MinMaxScaler()
     data_scaled = scaler.fit_transform(data[features])
     data_scaled = pd.DataFrame(data_scaled, columns=features)
     
@@ -90,16 +90,13 @@ def preprocess_data(data, seq_len=48, prediction_horizon=4):
     for i in range(len(data_scaled) - seq_len - prediction_horizon):
         seq = data_scaled.iloc[i:i+seq_len].values
         
-        # Look ahead multiple hours and require sustained movement
+        # Simpler, more achievable target definition
         current_close = data['close'].iloc[i+seq_len]
-        future_prices = data['close'].iloc[i+seq_len+1:i+seq_len+prediction_horizon+1]
+        future_close = data['close'].iloc[i+seq_len+prediction_horizon]
         
-        # More sophisticated labeling: require movement AND sustainability
-        max_future_return = (future_prices.max() - current_close) / current_close
-        final_return = (future_prices.iloc[-1] - current_close) / current_close
-        
-        # Stricter criteria: higher threshold + sustained movement
-        label = 1 if (max_future_return > 0.015 and final_return > 0.005) else 0
+        # More realistic threshold - just 0.8% gain over 2 hours
+        pct_change = (future_close - current_close) / current_close
+        label = 1 if pct_change > 0.008 else 0
         
         sequences.append(seq)
         labels.append(label)
@@ -116,58 +113,53 @@ class ImprovedCNNMLP(nn.Module):
     def __init__(self, seq_len, num_features):
         super(ImprovedCNNMLP, self).__init__()
         
-        # Multi-scale CNN layers
-        self.conv1 = nn.Conv1d(num_features, 128, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv1d(128, 64, kernel_size=5, padding=2)
-        self.conv3 = nn.Conv1d(64, 32, kernel_size=7, padding=3)
+        # Simpler CNN layers to prevent over-regularization
+        self.conv1 = nn.Conv1d(num_features, 64, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(64, 32, kernel_size=3, padding=1)
         
-        # Batch normalization and dropout
-        self.bn1 = nn.BatchNorm1d(128)
-        self.bn2 = nn.BatchNorm1d(64)
-        self.bn3 = nn.BatchNorm1d(32)
+        # Lighter regularization
+        self.bn1 = nn.BatchNorm1d(64)
+        self.bn2 = nn.BatchNorm1d(32)
         
-        self.pool = nn.AdaptiveAvgPool1d(1)  # Global average pooling
-        self.dropout = nn.Dropout(0.3)
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.dropout = nn.Dropout(0.2)  # Reduced dropout
         
-        # MLP layers
-        self.fc1 = nn.Linear(32, 64)
-        self.fc2 = nn.Linear(64, 32)
-        self.fc3 = nn.Linear(32, 16)
-        self.fc4 = nn.Linear(16, 1)
-        
-        # Layer normalization
-        self.ln1 = nn.LayerNorm(64)
-        self.ln2 = nn.LayerNorm(32)
-        self.ln3 = nn.LayerNorm(16)
+        # Simpler MLP
+        self.fc1 = nn.Linear(32, 32)
+        self.fc2 = nn.Linear(32, 16)
+        self.fc3 = nn.Linear(16, 1)
         
         self.relu = nn.ReLU()
+        
+        # Initialize weights to encourage predictions
+        self._initialize_weights()
+        
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.1)  # Small positive bias
         
     def forward(self, x):
         # x shape: [batch_size, seq_len, features]
         x = x.permute(0, 2, 1)  # [batch_size, features, seq_len]
         
-        # Multi-scale CNN
+        # CNN layers
         x = self.relu(self.bn1(self.conv1(x)))
         x = self.dropout(x)
         
         x = self.relu(self.bn2(self.conv2(x)))
-        x = self.dropout(x)
-        
-        x = self.relu(self.bn3(self.conv3(x)))
         
         # Global pooling
         x = self.pool(x).squeeze(-1)  # [batch_size, 32]
         
-        # MLP layers with residual connections
-        residual = x
-        x = self.relu(self.ln1(self.fc1(x)))
+        # MLP layers
+        x = self.relu(self.fc1(x))
         x = self.dropout(x)
         
-        x = self.relu(self.ln2(self.fc2(x)))
-        x = self.dropout(x)
-        
-        x = self.relu(self.ln3(self.fc3(x)))
-        x = self.fc4(x)
+        x = self.relu(self.fc2(x))
+        x = self.fc3(x)
         
         return x
 
@@ -287,7 +279,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
     
     return model, history
 
-def advanced_backtest(model, test_loader, threshold_range=np.arange(0.3, 0.9, 0.05)):
+def advanced_backtest(model, test_loader, threshold_range=np.arange(0.1, 0.8, 0.05)):
     """
     Advanced backtesting with threshold optimization.
     """
@@ -310,11 +302,15 @@ def advanced_backtest(model, test_loader, threshold_range=np.arange(0.3, 0.9, 0.
     all_probs = np.array(all_probs)
     all_labels = np.array(all_labels)
     
+    print(f"Probability distribution: Min={np.min(all_probs):.3f}, Max={np.max(all_probs):.3f}, Mean={np.mean(all_probs):.3f}, Std={np.std(all_probs):.3f}")
+    print(f"Positive class percentage: {np.mean(all_labels)*100:.2f}%")
+    
     best_threshold = 0.5
     best_precision = 0
     best_win_rate = 0
+    best_f1 = 0
     
-    print("Threshold Optimization:")
+    print("\nThreshold Optimization:")
     print("Threshold | Signals | Hits | Win Rate | Precision | Recall | F1")
     print("-" * 70)
     
@@ -343,8 +339,9 @@ def advanced_backtest(model, test_loader, threshold_range=np.arange(0.3, 0.9, 0.
             
             print(f"{threshold:.2f}     | {signals:7} | {hits:4} | {win_rate:7.2%} | {precision:8.3f} | {recall:6.3f} | {f1:.3f}")
             
-            # Update best threshold based on precision and minimum signal count
-            if precision > best_precision and signals >= 20:  # At least 20 signals
+            # Update best threshold based on F1 score and minimum signal count
+            if f1 > best_f1 and signals >= 5:  # At least 5 signals
+                best_f1 = f1
                 best_precision = precision
                 best_win_rate = win_rate
                 best_threshold = threshold
@@ -355,6 +352,7 @@ def advanced_backtest(model, test_loader, threshold_range=np.arange(0.3, 0.9, 0.
     print(f"Best Threshold: {best_threshold:.2f}")
     print(f"Best Win Rate: {best_win_rate:.2%}")
     print(f"Best Precision: {best_precision:.3f}")
+    print(f"Best F1: {best_f1:.3f}")
     
     return results, best_threshold
 
@@ -408,7 +406,7 @@ def main():
     data = load_data(data_path)
     
     # Preprocess Data with improved features
-    X, y, scaler = preprocess_data(data, seq_len=48, prediction_horizon=4)
+    X, y, scaler = preprocess_data(data, seq_len=24, prediction_horizon=2)
     
     # Temporal split (more realistic for time series)
     split_idx = int(len(X) * 0.7)
@@ -436,18 +434,22 @@ def main():
     
     print(f"Model built with input shape: ({seq_len}, {num_features})")
     
-    # Calculate class weights more accurately
-    pos_weight = torch.tensor([len(y_train) / (2 * np.sum(y_train))], dtype=torch.float32)
+    # Calculate class weights more carefully
+    pos_ratio = np.mean(y_train)
+    neg_ratio = 1 - pos_ratio
+    pos_weight = torch.tensor([neg_ratio / pos_ratio * 0.5], dtype=torch.float32)  # Reduced weight
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    print(f"Positive ratio: {pos_ratio:.3f}, Negative ratio: {neg_ratio:.3f}, Pos weight: {pos_weight.item():.3f}")
     
     # Define loss, optimizer, and scheduler
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(device))
-    optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50, eta_min=1e-6)
+    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.001)  # Reduced weight decay
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
     
     # Train Model
     print("Starting training...")
-    model, history = train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, epochs=50, patience=15)
+    model, history = train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, epochs=30, patience=10)
     
     # Advanced Backtesting
     print("\nPerforming advanced backtesting...")
