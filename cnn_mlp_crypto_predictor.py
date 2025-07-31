@@ -23,6 +23,22 @@ def load_data(file_path):
     data = data.sort_values('date').reset_index(drop=True)
     return data
 
+def load_daily_csv(file_path):
+    """
+    Load daily CSV (e.g., QQQ, SPY) and return DataFrame with 'date' column.
+    Assumes columns: Price,Close,High,Low,Open,Volume, with Date as index or column.
+    """
+    df = pd.read_csv(file_path)
+    # Try to find the date column
+    if 'Date' in df.columns:
+        df['date'] = pd.to_datetime(df['Date'])
+    else:
+        df['date'] = pd.to_datetime(df.index)
+    # Use only numeric columns
+    numeric_cols = ['Close', 'High', 'Low', 'Open', 'Volume']
+    df = df[['date'] + [col for col in numeric_cols if col in df.columns]]
+    return df.sort_values('date').reset_index(drop=True)
+
 def add_technical_indicators(data):
     """
     Add technical indicators to improve signal quality.
@@ -65,48 +81,78 @@ def add_technical_indicators(data):
     data = data.dropna().reset_index(drop=True)
     return data
 
-def preprocess_data(data, seq_len=24, prediction_horizon=2):
+def preprocess_data(data, qqq_df, spy_df, seq_len=24, prediction_horizon=2):
     """
     Improved preprocessing with better feature engineering and target definition.
+    Now includes QQQ and SPY daily features.
     """
     # Add technical indicators
     data = add_technical_indicators(data)
-    
+
+    # Ensure all 'date' columns are timezone-naive for merging
+    if data['date'].dt.tz is not None:
+        data['date'] = data['date'].dt.tz_localize(None)
+    if qqq_df['date'].dt.tz is not None:
+        qqq_df['date'] = qqq_df['date'].dt.tz_localize(None)
+    if spy_df['date'].dt.tz is not None:
+        spy_df['date'] = spy_df['date'].dt.tz_localize(None)
+
+    # Merge QQQ and SPY daily features (as-of join: use last available daily value for each 1h row)
+    for etf_name, etf_df in [('qqq', qqq_df), ('spy', spy_df)]:
+        etf_df = etf_df.copy()
+        etf_df = etf_df.sort_values('date')
+        # Forward fill to cover all hours in BTC/USDT
+        data = pd.merge_asof(
+            data.sort_values('date'),
+            etf_df.sort_values('date'),
+            on='date',
+            direction='backward',
+            suffixes=('', f'_{etf_name}')
+        )
+        # Rename columns to include etf_name
+        for col in ['Close', 'High', 'Low', 'Open', 'Volume']:
+            if col in data.columns:
+                data.rename(columns={col: f"{col.lower()}_{etf_name}"}, inplace=True)
+
     # Select features
     features = ['open', 'high', 'low', 'close', 'volume',
                'sma_5', 'sma_20', 'ema_12', 'ema_26', 'volatility',
                'price_change', 'rsi', 'macd', 'macd_signal', 'macd_diff',
                'bb_high', 'bb_low', 'bb_mid', 'bb_width',
-               'volume_sma', 'volume_ratio', 'price_position']
-    
+               'volume_sma', 'volume_ratio', 'price_position',
+               # Add QQQ and SPY features
+               'close_qqq', 'high_qqq', 'low_qqq', 'open_qqq', 'volume_qqq',
+               'close_spy', 'high_spy', 'low_spy', 'open_spy', 'volume_spy'
+               ]
+
     # Use MinMaxScaler for bounded outputs that work better with sigmoid
     scaler = MinMaxScaler()
     data_scaled = scaler.fit_transform(data[features])
     data_scaled = pd.DataFrame(data_scaled, columns=features)
-    
+
     sequences = []
     labels = []
-    
+
     for i in range(len(data_scaled) - seq_len - prediction_horizon):
         seq = data_scaled.iloc[i:i+seq_len].values
-        
+
         # Simpler, more achievable target definition
         current_close = data['close'].iloc[i+seq_len]
         future_close = data['close'].iloc[i+seq_len+prediction_horizon]
-        
+
         # More realistic threshold - just 0.8% gain over 2 hours
         pct_change = (future_close - current_close) / current_close
         label = 1 if pct_change > 0.008 else 0
-        
+
         sequences.append(seq)
         labels.append(label)
-    
+
     X = np.array(sequences)
     y = np.array(labels)
-    
+
     print(f"Dataset shape: {X.shape}")
     print(f"Positive samples: {np.sum(y)} ({np.mean(y)*100:.2f}%)")
-    
+
     return X, y, scaler
 
 class ImprovedCNNMLP(nn.Module):
@@ -404,60 +450,66 @@ def main():
     # Load Data
     data_path = os.path.join('data', 'BTC_USDT-1h.feather')
     data = load_data(data_path)
-    
-    # Preprocess Data with improved features
-    X, y, scaler = preprocess_data(data, seq_len=24, prediction_horizon=2)
-    
+
+    # Load QQQ and SPY daily data
+    qqq_path = os.path.join('data', 'QQQ_5y_daily.csv')
+    spy_path = os.path.join('data', 'SPY_5y_daily.csv')
+    qqq_df = load_daily_csv(qqq_path)
+    spy_df = load_daily_csv(spy_path)
+
+    # Preprocess Data with improved features and ETF factors
+    X, y, scaler = preprocess_data(data, qqq_df, spy_df, seq_len=24, prediction_horizon=2)
+
     # Temporal split (more realistic for time series)
     split_idx = int(len(X) * 0.7)
     val_split_idx = int(len(X) * 0.85)
-    
+
     X_train, y_train = X[:split_idx], y[:split_idx]
     X_val, y_val = X[split_idx:val_split_idx], y[split_idx:val_split_idx]
     X_test, y_test = X[val_split_idx:], y[val_split_idx:]
-    
+
     print(f"Train samples: {len(X_train)}, Val samples: {len(X_val)}, Test samples: {len(X_test)}")
-    
+
     # Create DataLoaders
     train_dataset = TensorDataset(torch.tensor(X_train), torch.tensor(y_train))
     val_dataset = TensorDataset(torch.tensor(X_val), torch.tensor(y_val))
     test_dataset = TensorDataset(torch.tensor(X_test), torch.tensor(y_test))
-    
+
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
-    
+
     # Build Model
     seq_len = X.shape[1]
     num_features = X.shape[2]
     model = build_model(seq_len, num_features)
-    
+
     print(f"Model built with input shape: ({seq_len}, {num_features})")
-    
+
     # Calculate class weights more carefully
     pos_ratio = np.mean(y_train)
     neg_ratio = 1 - pos_ratio
     pos_weight = torch.tensor([neg_ratio / pos_ratio * 0.5], dtype=torch.float32)  # Reduced weight
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
     print(f"Positive ratio: {pos_ratio:.3f}, Negative ratio: {neg_ratio:.3f}, Pos weight: {pos_weight.item():.3f}")
-    
+
     # Define loss, optimizer, and scheduler
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(device))
     optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.001)  # Reduced weight decay
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
-    
+
     # Train Model
     print("Starting training...")
     model, history = train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, epochs=30, patience=10)
-    
+
     # Advanced Backtesting
     print("\nPerforming advanced backtesting...")
     backtest_results, best_threshold = advanced_backtest(model, test_loader)
-    
+
     # Visualize Results
     visualize_results(history, backtest_results)
-    
+
     print(f"\nFinal recommendation: Use threshold {best_threshold:.2f} for trading signals")
 
 if __name__ == "__main__":
