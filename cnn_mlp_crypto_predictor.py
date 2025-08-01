@@ -29,14 +29,20 @@ def load_daily_csv(file_path):
     Assumes columns: Price,Close,High,Low,Open,Volume, with Date as index or column.
     """
     df = pd.read_csv(file_path)
+    # Lowercase all column names for consistency
+    df.columns = df.columns.str.lower()
     # Try to find the date column
-    if 'Date' in df.columns:
-        df['date'] = pd.to_datetime(df['Date'])
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'])
     else:
         df['date'] = pd.to_datetime(df.index)
     # Use only numeric columns
-    numeric_cols = ['Close', 'High', 'Low', 'Open', 'Volume']
+    numeric_cols = ['close', 'high', 'low', 'open', 'volume']
     df = df[['date'] + [col for col in numeric_cols if col in df.columns]]
+    # Convert all numeric columns to float, coercing errors to NaN
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
     return df.sort_values('date').reset_index(drop=True)
 
 def add_technical_indicators(data):
@@ -81,13 +87,54 @@ def add_technical_indicators(data):
     data = data.dropna().reset_index(drop=True)
     return data
 
+def add_technical_indicators_to_etf(data, prefix=""):
+    """
+    Add technical indicators to ETF (QQQ, SPY) daily data.
+    Prefix all columns with the given prefix.
+    """
+    df = data.copy()
+    # Price-based indicators
+    df[f'{prefix}sma_5'] = df['close'].rolling(window=5).mean()
+    df[f'{prefix}sma_20'] = df['close'].rolling(window=20).mean()
+    df[f'{prefix}ema_12'] = df['close'].ewm(span=12).mean()
+    df[f'{prefix}ema_26'] = df['close'].ewm(span=26).mean()
+    # Volatility
+    df[f'{prefix}volatility'] = df['close'].rolling(window=20).std()
+    df[f'{prefix}price_change'] = df['close'].pct_change()
+    # RSI
+    df[f'{prefix}rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+    # MACD
+    macd = ta.trend.MACD(df['close'])
+    df[f'{prefix}macd'] = macd.macd()
+    df[f'{prefix}macd_signal'] = macd.macd_signal()
+    df[f'{prefix}macd_diff'] = macd.macd_diff()
+    # Bollinger Bands
+    bollinger = ta.volatility.BollingerBands(df['close'])
+    df[f'{prefix}bb_high'] = bollinger.bollinger_hband()
+    df[f'{prefix}bb_low'] = bollinger.bollinger_lband()
+    df[f'{prefix}bb_mid'] = bollinger.bollinger_mavg()
+    df[f'{prefix}bb_width'] = (df[f'{prefix}bb_high'] - df[f'{prefix}bb_low']) / df[f'{prefix}bb_mid']
+    # Volume indicators
+    df[f'{prefix}volume_sma'] = df['volume'].rolling(window=20).mean()
+    df[f'{prefix}volume_ratio'] = df['volume'] / df[f'{prefix}volume_sma']
+    # Price position within range
+    df[f'{prefix}price_position'] = (df['close'] - df['low'].rolling(20).min()) / \
+                                   (df['high'].rolling(20).max() - df['low'].rolling(20).min())
+    # Drop NaN values
+    df = df.dropna().reset_index(drop=True)
+    return df
+
 def preprocess_data(data, qqq_df, spy_df, seq_len=24, prediction_horizon=2):
     """
     Improved preprocessing with better feature engineering and target definition.
-    Now includes QQQ and SPY daily features.
+    Now includes QQQ and SPY daily features and their technical indicators.
     """
-    # Add technical indicators
+    # Add technical indicators to ETH/USDT
     data = add_technical_indicators(data)
+
+    # Add technical indicators to QQQ and SPY
+    qqq_df = add_technical_indicators_to_etf(qqq_df, prefix="qqq_")
+    spy_df = add_technical_indicators_to_etf(spy_df, prefix="spy_")
 
     # Ensure all 'date' columns are timezone-naive for merging
     if data['date'].dt.tz is not None:
@@ -101,7 +148,7 @@ def preprocess_data(data, qqq_df, spy_df, seq_len=24, prediction_horizon=2):
     for etf_name, etf_df in [('qqq', qqq_df), ('spy', spy_df)]:
         etf_df = etf_df.copy()
         etf_df = etf_df.sort_values('date')
-        # Forward fill to cover all hours in BTC/USDT
+        # Forward fill to cover all hours in ETH/USDT
         data = pd.merge_asof(
             data.sort_values('date'),
             etf_df.sort_values('date'),
@@ -109,21 +156,28 @@ def preprocess_data(data, qqq_df, spy_df, seq_len=24, prediction_horizon=2):
             direction='backward',
             suffixes=('', f'_{etf_name}')
         )
-        # Rename columns to include etf_name
-        for col in ['Close', 'High', 'Low', 'Open', 'Volume']:
-            if col in data.columns:
-                data.rename(columns={col: f"{col.lower()}_{etf_name}"}, inplace=True)
 
     # Select features
-    features = ['open', 'high', 'low', 'close', 'volume',
-               'sma_5', 'sma_20', 'ema_12', 'ema_26', 'volatility',
-               'price_change', 'rsi', 'macd', 'macd_signal', 'macd_diff',
-               'bb_high', 'bb_low', 'bb_mid', 'bb_width',
-               'volume_sma', 'volume_ratio', 'price_position',
-               # Add QQQ and SPY features
-               'close_qqq', 'high_qqq', 'low_qqq', 'open_qqq', 'volume_qqq',
-               'close_spy', 'high_spy', 'low_spy', 'open_spy', 'volume_spy'
-               ]
+    features = [
+        # ETH/USDT features
+        'open', 'high', 'low', 'close', 'volume',
+        'sma_5', 'sma_20', 'ema_12', 'ema_26', 'volatility',
+        'price_change', 'rsi', 'macd', 'macd_signal', 'macd_diff',
+        'bb_high', 'bb_low', 'bb_mid', 'bb_width',
+        'volume_sma', 'volume_ratio', 'price_position',
+        # QQQ features (OHLCV + technicals)
+        'close_qqq', 'high_qqq', 'low_qqq', 'open_qqq', 'volume_qqq',
+        'qqq_sma_5', 'qqq_sma_20', 'qqq_ema_12', 'qqq_ema_26', 'qqq_volatility',
+        'qqq_price_change', 'qqq_rsi', 'qqq_macd', 'qqq_macd_signal', 'qqq_macd_diff',
+        'qqq_bb_high', 'qqq_bb_low', 'qqq_bb_mid', 'qqq_bb_width',
+        'qqq_volume_sma', 'qqq_volume_ratio', 'qqq_price_position',
+        # SPY features (OHLCV + technicals)
+        'close_spy', 'high_spy', 'low_spy', 'open_spy', 'volume_spy',
+        'spy_sma_5', 'spy_sma_20', 'spy_ema_12', 'spy_ema_26', 'spy_volatility',
+        'spy_price_change', 'spy_rsi', 'spy_macd', 'spy_macd_signal', 'spy_macd_diff',
+        'spy_bb_high', 'spy_bb_low', 'spy_bb_mid', 'spy_bb_width',
+        'spy_volume_sma', 'spy_volume_ratio', 'spy_price_position'
+    ]
 
     # Use MinMaxScaler for bounded outputs that work better with sigmoid
     scaler = MinMaxScaler()
@@ -448,7 +502,7 @@ def visualize_results(history, backtest_results):
 
 def main():
     # Load Data
-    data_path = os.path.join('data', 'BTC_USDT-1h.feather')
+    data_path = os.path.join('data', 'ETH_USDT-1h.feather')
     data = load_data(data_path)
 
     # Load QQQ and SPY daily data
