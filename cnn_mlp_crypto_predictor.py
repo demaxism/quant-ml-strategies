@@ -124,10 +124,10 @@ def add_technical_indicators_to_etf(data, prefix=""):
     df = df.dropna().reset_index(drop=True)
     return df
 
-def preprocess_data(data, qqq_df, spy_df, seq_len=24, prediction_horizon=2):
+def preprocess_data(data, qqq_df, spy_df, btc_df, seq_len=24, prediction_horizon=2):
     """
     Improved preprocessing with better feature engineering and target definition.
-    Now includes QQQ and SPY daily features and their technical indicators.
+    Now includes QQQ, SPY, and BTC-USDT features and their technical indicators.
     """
     # Add technical indicators to ETH/USDT
     data = add_technical_indicators(data)
@@ -136,6 +136,11 @@ def preprocess_data(data, qqq_df, spy_df, seq_len=24, prediction_horizon=2):
     qqq_df = add_technical_indicators_to_etf(qqq_df, prefix="qqq_")
     spy_df = add_technical_indicators_to_etf(spy_df, prefix="spy_")
 
+    # Add technical indicators to BTC/USDT
+    btc_df = add_technical_indicators(btc_df)
+    # Prefix BTC columns (except date)
+    btc_df = btc_df.rename(columns={col: f'btc_{col}' for col in btc_df.columns if col != 'date'})
+
     # Ensure all 'date' columns are timezone-naive for merging
     if data['date'].dt.tz is not None:
         data['date'] = data['date'].dt.tz_localize(None)
@@ -143,6 +148,8 @@ def preprocess_data(data, qqq_df, spy_df, seq_len=24, prediction_horizon=2):
         qqq_df['date'] = qqq_df['date'].dt.tz_localize(None)
     if spy_df['date'].dt.tz is not None:
         spy_df['date'] = spy_df['date'].dt.tz_localize(None)
+    if btc_df['date'].dt.tz is not None:
+        btc_df['date'] = btc_df['date'].dt.tz_localize(None)
 
     # Merge QQQ and SPY daily features (as-of join: use last available daily value for each 1h row)
     for etf_name, etf_df in [('qqq', qqq_df), ('spy', spy_df)]:
@@ -157,6 +164,14 @@ def preprocess_data(data, qqq_df, spy_df, seq_len=24, prediction_horizon=2):
             suffixes=('', f'_{etf_name}')
         )
 
+    # Merge BTC features (as-of join)
+    data = pd.merge_asof(
+        data.sort_values('date'),
+        btc_df.sort_values('date'),
+        on='date',
+        direction='backward'
+    )
+
     # Select features
     features = [
         # ETH/USDT features
@@ -165,6 +180,12 @@ def preprocess_data(data, qqq_df, spy_df, seq_len=24, prediction_horizon=2):
         'price_change', 'rsi', 'macd', 'macd_signal', 'macd_diff',
         'bb_high', 'bb_low', 'bb_mid', 'bb_width',
         'volume_sma', 'volume_ratio', 'price_position',
+        # BTC/USDT features (OHLCV + technicals)
+        'btc_open', 'btc_high', 'btc_low', 'btc_close', 'btc_volume',
+        'btc_sma_5', 'btc_sma_20', 'btc_ema_12', 'btc_ema_26', 'btc_volatility',
+        'btc_price_change', 'btc_rsi', 'btc_macd', 'btc_macd_signal', 'btc_macd_diff',
+        'btc_bb_high', 'btc_bb_low', 'btc_bb_mid', 'btc_bb_width',
+        'btc_volume_sma', 'btc_volume_ratio', 'btc_price_position',
         # QQQ features (OHLCV + technicals)
         'close_qqq', 'high_qqq', 'low_qqq', 'open_qqq', 'volume_qqq',
         'qqq_sma_5', 'qqq_sma_20', 'qqq_ema_12', 'qqq_ema_26', 'qqq_volatility',
@@ -178,6 +199,9 @@ def preprocess_data(data, qqq_df, spy_df, seq_len=24, prediction_horizon=2):
         'spy_bb_high', 'spy_bb_low', 'spy_bb_mid', 'spy_bb_width',
         'spy_volume_sma', 'spy_volume_ratio', 'spy_price_position'
     ]
+
+    # Drop NaNs after all merges
+    data = data.dropna().reset_index(drop=True)
 
     # Use MinMaxScaler for bounded outputs that work better with sigmoid
     scaler = MinMaxScaler()
@@ -505,6 +529,10 @@ def main():
     data_path = os.path.join('data', 'ETH_USDT-1h.feather')
     data = load_data(data_path)
 
+    # Load BTC/USDT 1h data
+    btc_path = os.path.join('data', 'BTC_USDT-1h.feather')
+    btc_df = load_data(btc_path)
+
     # Load QQQ and SPY daily data
     qqq_path = os.path.join('data', 'QQQ_5y_daily.csv')
     spy_path = os.path.join('data', 'SPY_5y_daily.csv')
@@ -512,7 +540,7 @@ def main():
     spy_df = load_daily_csv(spy_path)
 
     # Preprocess Data with improved features and ETF factors
-    X, y, scaler = preprocess_data(data, qqq_df, spy_df, seq_len=24, prediction_horizon=2)
+    X, y, scaler = preprocess_data(data, qqq_df, spy_df, btc_df, seq_len=24, prediction_horizon=2)
 
     # Temporal split (more realistic for time series)
     split_idx = int(len(X) * 0.7)
