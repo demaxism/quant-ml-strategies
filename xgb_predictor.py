@@ -25,11 +25,6 @@ import os
 
 warnings.filterwarnings("ignore")
 
-# ====== 用户可调参数 ======
-ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
-BET_PROB_THRESHOLD = 0.85   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
-DATA_FILE = "data/XRP_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-1h.feather"
-
 # ======= 输出信息说明 =======
 # prob是模型对“未来涨1%”的概率预测，label是实际是否涨了1%（回测时已知）
 
@@ -51,7 +46,10 @@ DATA_FILE = "data/XRP_USDT-4h.feather"  # 输入数据文件，可选如 "data/E
 #    \= (下注且实际上涨的次数) / (下注次数)\
 #    在本脚本的回测环节，命中率的定义和精确率是一样的：
 
-
+# ====== 用户可调参数 ======
+ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
+BET_PROB_THRESHOLD = 0.85   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
+DATA_FILE = "data/LTC_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-1h.feather"
 
 
 def load_data(file_path):
