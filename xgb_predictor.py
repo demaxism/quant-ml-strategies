@@ -25,6 +25,11 @@ import os
 
 warnings.filterwarnings("ignore")
 
+# ====== 用户可调参数 ======
+ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
+BET_PROB_THRESHOLD = 0.75   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
+DATA_FILE = "data/ETH_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-1h.feather"
+
 def load_data(file_path):
     """
     读取K线数据，支持feather和csv，按时间升序排序
@@ -232,17 +237,14 @@ def plot_bet_results(df, y_prob, bets, n_hist=4):
     plt.close()
     print("已保存下注可视化图：bet_visualization.png")
 
-# ====== 特征工程开关 ======
-ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
-
 def main():
     # 1. 数据读取
-    file_path = "data/BTC_USDT-4h.feather"  # 或 data.csv
-    df = load_data(file_path)
+    df = load_data(DATA_FILE)
     print(f"数据量: {len(df)}")
 
     # 2. 特征工程
-    X, y, feature_names = add_features(df, n_hist=4, bonus=True, advanced=ADVANCED_FEATURES)  # bonus=True可选扩展
+    n_hist = 4
+    X, y, feature_names = add_features(df, n_hist=n_hist, bonus=True, advanced=ADVANCED_FEATURES)  # bonus=True可选扩展
     print(f"特征维度: {X.shape}, 正样本比例: {y.mean():.2%}")
 
     # 3. 划分训练集/测试集
@@ -250,13 +252,24 @@ def main():
         X, y, test_size=0.2, shuffle=False  # 时间序列不打乱
     )
 
+    # 输出训练集和回测集的日期区间
+    total = len(y)
+    train_size = len(y_train)
+    test_size = len(y_test)
+    # 特征和标签起始于 df[n_hist:len(df)-4]
+    date_feat = df['date'].iloc[n_hist:len(df)-4].reset_index(drop=True)
+    train_dates = date_feat.iloc[:train_size]
+    test_dates = date_feat.iloc[train_size:]
+    print(f"训练集日期区间: {train_dates.iloc[0]} ~ {train_dates.iloc[-1]}")
+    print(f"回测集日期区间: {test_dates.iloc[0]} ~ {test_dates.iloc[-1]}")
+
     # 4. 训练模型
     model = train_xgb(X_train, y_train, X_test, y_test)
 
     # 5. 回测模拟
     # 获取测试集对应的df行
     df_test = df.iloc[-len(y):].iloc[-len(y_test):].reset_index(drop=True)
-    y_prob, bets = backtest(model, X_test, y_test, df_test=df_test, prob_thres=0.7)
+    y_prob, bets = backtest(model, X_test, y_test, df_test=df_test, prob_thres=BET_PROB_THRESHOLD)
 
     # 6. 可选扩展：SHAP解释
     try:
@@ -266,7 +279,7 @@ def main():
 
     # 7. 可选扩展：下注时机可视化
     try:
-        plot_bet_results(df.iloc[-len(y):], y_prob, bets, n_hist=4)
+        plot_bet_results(df.iloc[-len(y):], y_prob, bets, n_hist=n_hist)
     except Exception as e:
         print("下注可视化失败：", e)
 
