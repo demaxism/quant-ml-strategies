@@ -27,7 +27,7 @@ warnings.filterwarnings("ignore")
 
 # ====== 用户可调参数 ======
 ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
-BET_PROB_THRESHOLD = 0.75   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
+BET_PROB_THRESHOLD = 0.85   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
 DATA_FILE = "data/ETH_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-1h.feather"
 
 def load_data(file_path):
@@ -262,6 +262,8 @@ def main():
     test_dates = date_feat.iloc[train_size:]
     print(f"训练集日期区间: {train_dates.iloc[0]} ~ {train_dates.iloc[-1]}")
     print(f"回测集日期区间: {test_dates.iloc[0]} ~ {test_dates.iloc[-1]}")
+    print(f"回测集区间价格始值: {df['close'].iloc[test_dates.index[0]]}")
+    print(f"回测集区间价格终值: {df['close'].iloc[test_dates.index[-1]]}")
 
     # 4. 训练模型
     model = train_xgb(X_train, y_train, X_test, y_test)
