@@ -247,15 +247,24 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 break
             high = df_test.iloc[idx + k]['high']
             low = df_test.iloc[idx + k]['low']
+            tp_price = open_price * (1 + take_profit)
+            sl_price = open_price * (1 + stop_loss)
+            # 同时穿越止盈止损，采用中间法（平均法）
+            if high >= tp_price and low <= sl_price:
+                pnl = (take_profit + stop_loss) / 2
+                close_price = open_price * (1 + pnl)
+                hit = True
+                print(f"{idx}\t{date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(平均法成交)")
+                break
             # 止盈
-            if high >= open_price * (1 + take_profit):
-                close_price = open_price * (1 + take_profit)
+            if high >= tp_price:
+                close_price = tp_price
                 pnl = take_profit
                 hit = True
                 break
             # 止损
-            if low <= open_price * (1 + stop_loss):
-                close_price = open_price * (1 + stop_loss)
+            if low <= sl_price:
+                close_price = sl_price
                 pnl = stop_loss
                 hit = True
                 break
