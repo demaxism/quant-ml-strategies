@@ -26,7 +26,7 @@ import os
 warnings.filterwarnings("ignore")
 
 # ======= 输出信息说明 =======
-# prob是模型对“未来涨1%”的概率预测，label是实际是否涨了1%（回测时已知）
+# prob是模型对“未来涨1%”的概率预测，label是实际是否涨了1%(RISE_THRESHOLD)（回测时已知）
 
 # 1. __准确率（Accuracy）__\
 #    \= (预测对的样本数) / (总样本数)\
@@ -50,6 +50,7 @@ warnings.filterwarnings("ignore")
 ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
 BET_PROB_THRESHOLD = 0.85   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
 RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
+FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
 DATA_FILE = "data/LTC_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-1h.feather"
 
 
@@ -106,11 +107,12 @@ def is_hammer(open_, high_, low_, close_):
     lower = min(open_, close_) - low_
     return int(body < (high_ - low_) * 0.3 and lower > 2 * body and upper < body)
 
-def add_features(df, n_hist=4, bonus=False, advanced=True, rise_threshold=RISE_THRESHOLD):
+def add_features(df, n_hist=4, bonus=False, advanced=True, rise_threshold=RISE_THRESHOLD, future_k=FUTURE_K_NUM):
     """
     提取特征：前n_hist根K线的OHLCV、技术指标、K线形态特征
     advanced=True时启用技术指标和K线形态特征，否则只用基础特征
     rise_threshold: 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
+    future_k: 目标变量观察的未来K线数量（如4表示未来4根K线）
     """
     df = df.copy()
     if advanced:
@@ -182,9 +184,9 @@ def add_features(df, n_hist=4, bonus=False, advanced=True, rise_threshold=RISE_T
     X = np.array(feats)
     # 目标变量
     y = []
-    for i in range(n_hist, len(df)-4):
+    for i in range(n_hist, len(df)-future_k):
         cur_close = df.iloc[i]['close']
-        future_high = df.iloc[i+1:i+5]['high'].max()
+        future_high = df.iloc[i+1:i+1+future_k]['high'].max()
         label = 1 if (future_high - cur_close) / cur_close >= rise_threshold else 0
         y.append(label)
     y = np.array(y)
@@ -268,7 +270,10 @@ def main():
 
     # 2. 特征工程
     n_hist = 4
-    X, y, feature_names = add_features(df, n_hist=n_hist, bonus=True, advanced=ADVANCED_FEATURES, rise_threshold=RISE_THRESHOLD)  # bonus=True可选扩展
+    X, y, feature_names = add_features(
+        df, n_hist=n_hist, bonus=True, advanced=ADVANCED_FEATURES,
+        rise_threshold=RISE_THRESHOLD, future_k=FUTURE_K_NUM
+    )  # bonus=True可选扩展
     print(f"特征维度: {X.shape}, 正样本比例: {y.mean():.2%}")
 
     # 3. 划分训练集/测试集
