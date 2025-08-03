@@ -118,9 +118,9 @@ def train_xgb(X_train, y_train, X_test, y_test):
     print(f"准确率: {acc:.4f}  精确率: {prec:.4f}  召回率: {rec:.4f}")
     return model
 
-def backtest(model, X_test, y_test, prob_thres=0.7):
+def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7):
     """
-    回测：预测概率>prob_thres视为下注，统计命中率
+    回测：预测概率>prob_thres视为下注，统计命中率，并输出每次下注的信息
     """
     y_prob = model.predict_proba(X_test)[:,1]
     bets = y_prob > prob_thres
@@ -128,6 +128,15 @@ def backtest(model, X_test, y_test, prob_thres=0.7):
     hits = ((y_test == 1) & bets).sum()
     hit_rate = hits / total_bets if total_bets > 0 else 0
     print(f"回测：下注次数={total_bets} 命中次数={hits} 命中率={hit_rate:.2%}")
+
+    # 输出每次下注的信息
+    if df_test is not None:
+        print("每次下注详情：")
+        print("idx\tdate\t\tprob\tlabel\tclose")
+        for idx in np.where(bets)[0]:
+            date = df_test.iloc[idx]['date'] if 'date' in df_test.columns else ''
+            close = df_test.iloc[idx]['close'] if 'close' in df_test.columns else ''
+            print(f"{idx}\t{date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{close}")
     return y_prob, bets
 
 def plot_shap(model, X, feature_names):
@@ -177,7 +186,9 @@ def main():
     model = train_xgb(X_train, y_train, X_test, y_test)
 
     # 5. 回测模拟
-    y_prob, bets = backtest(model, X_test, y_test, prob_thres=0.7)
+    # 获取测试集对应的df行
+    df_test = df.iloc[-len(y):].iloc[-len(y_test):].reset_index(drop=True)
+    y_prob, bets = backtest(model, X_test, y_test, df_test=df_test, prob_thres=0.7)
 
     # 6. 可选扩展：SHAP解释
     try:
