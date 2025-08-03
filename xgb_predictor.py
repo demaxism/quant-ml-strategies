@@ -44,48 +44,113 @@ def load_data(file_path):
     df = df.sort_values('date').reset_index(drop=True)
     return df
 
-def add_features(df, n_hist=4, bonus=False):
+def calc_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / (loss + 1e-8)
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calc_macd(series, fast=12, slow=26, signal=9):
+    ema_fast = series.ewm(span=fast, adjust=False).mean()
+    ema_slow = series.ewm(span=slow, adjust=False).mean()
+    macd = ema_fast - ema_slow
+    signal_line = macd.ewm(span=signal, adjust=False).mean()
+    hist = macd - signal_line
+    return macd, signal_line, hist
+
+def calc_kdj(df, n=9, k_period=3, d_period=3):
+    low_min = df['low'].rolling(window=n, min_periods=1).min()
+    high_max = df['high'].rolling(window=n, min_periods=1).max()
+    rsv = (df['close'] - low_min) / (high_max - low_min + 1e-8) * 100
+    k = rsv.ewm(com=k_period-1, adjust=False).mean()
+    d = k.ewm(com=d_period-1, adjust=False).mean()
+    j = 3 * k - 2 * d
+    return k, d, j
+
+def is_bullish(open_, close_):
+    return int(close_ > open_)
+
+def is_hammer(open_, high_, low_, close_):
+    body = abs(close_ - open_)
+    upper = high_ - max(open_, close_)
+    lower = min(open_, close_) - low_
+    return int(body < (high_ - low_) * 0.3 and lower > 2 * body and upper < body)
+
+def add_features(df, n_hist=4, bonus=False, advanced=True):
     """
-    提取特征：前n_hist根K线的OHLCV，可选bonus特征
+    提取特征：前n_hist根K线的OHLCV、技术指标、K线形态特征
+    advanced=True时启用技术指标和K线形态特征，否则只用基础特征
     """
+    df = df.copy()
+    if advanced:
+        # 计算技术指标
+        df['rsi'] = calc_rsi(df['close'])
+        macd, macd_signal, macd_hist = calc_macd(df['close'])
+        df['macd'] = macd
+        df['macd_signal'] = macd_signal
+        df['macd_hist'] = macd_hist
+        k, d, j = calc_kdj(df)
+        df['kdj_k'] = k
+        df['kdj_d'] = d
+        df['kdj_j'] = j
+
     feats = []
     col_names = []
     for i in range(n_hist, len(df)-4):
         feat = []
         for j in range(n_hist):
-            k = i - n_hist + j
+            k_idx = i - n_hist + j
             # OHLCV
             for col in ['open', 'high', 'low', 'close', 'volume']:
-                feat.append(df.iloc[k][col])
-                if i == n_hist:  # 只在第一次生成列名
-                    col_names.append(f'{col}_t-{n_hist-j}')
-            if bonus:
-                # 涨跌幅
-                ret = (df.iloc[k]['close'] - df.iloc[k]['open']) / df.iloc[k]['open']
-                feat.append(ret)
+                feat.append(df.iloc[k_idx][col])
                 if i == n_hist:
-                    col_names.append(f'ret_t-{n_hist-j}')
+                    col_names.append(f'{col}_t-{n_hist-j}')
+            if advanced:
+                # 技术指标
+                for col in ['rsi', 'macd', 'macd_signal', 'macd_hist', 'kdj_k', 'kdj_d', 'kdj_j']:
+                    feat.append(df.iloc[k_idx][col])
+                    if i == n_hist:
+                        col_names.append(f'{col}_t-{n_hist-j}')
+                # K线形态特征
+                open_ = df.iloc[k_idx]['open']
+                high_ = df.iloc[k_idx]['high']
+                low_ = df.iloc[k_idx]['low']
+                close_ = df.iloc[k_idx]['close']
+                # 阳线/阴线
+                feat.append(is_bullish(open_, close_))
+                if i == n_hist:
+                    col_names.append(f'is_bullish_t-{n_hist-j}')
+                # 锤头
+                feat.append(is_hammer(open_, high_, low_, close_))
+                if i == n_hist:
+                    col_names.append(f'is_hammer_t-{n_hist-j}')
                 # 实体长度
-                body = abs(df.iloc[k]['close'] - df.iloc[k]['open'])
+                body = abs(close_ - open_)
                 feat.append(body)
                 if i == n_hist:
                     col_names.append(f'body_t-{n_hist-j}')
                 # 上影线比例
-                upper = (df.iloc[k]['high'] - max(df.iloc[k]['open'], df.iloc[k]['close'])) / (df.iloc[k]['high'] - df.iloc[k]['low'] + 1e-8)
+                upper = (high_ - max(open_, close_)) / (high_ - low_ + 1e-8)
                 feat.append(upper)
                 if i == n_hist:
                     col_names.append(f'upper_shadow_t-{n_hist-j}')
                 # 下影线比例
-                lower = (min(df.iloc[k]['open'], df.iloc[k]['close']) - df.iloc[k]['low']) / (df.iloc[k]['high'] - df.iloc[k]['low'] + 1e-8)
+                lower = (min(open_, close_) - low_) / (high_ - low_ + 1e-8)
                 feat.append(lower)
                 if i == n_hist:
                     col_names.append(f'lower_shadow_t-{n_hist-j}')
+            if bonus:
+                open_ = df.iloc[k_idx]['open']
+                close_ = df.iloc[k_idx]['close']
+                # 涨跌幅
+                ret = (close_ - open_) / (open_ + 1e-8)
+                feat.append(ret)
+                if i == n_hist:
+                    col_names.append(f'ret_t-{n_hist-j}')
         feats.append(feat)
     X = np.array(feats)
-    if bonus:
-        n_feat = 20 + 4*3
-    else:
-        n_feat = 20
     # 目标变量
     y = []
     for i in range(n_hist, len(df)-4):
@@ -167,6 +232,9 @@ def plot_bet_results(df, y_prob, bets, n_hist=4):
     plt.close()
     print("已保存下注可视化图：bet_visualization.png")
 
+# ====== 特征工程开关 ======
+ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
+
 def main():
     # 1. 数据读取
     file_path = "data/BTC_USDT-4h.feather"  # 或 data.csv
@@ -174,7 +242,7 @@ def main():
     print(f"数据量: {len(df)}")
 
     # 2. 特征工程
-    X, y, feature_names = add_features(df, n_hist=4, bonus=True)  # bonus=True可选扩展
+    X, y, feature_names = add_features(df, n_hist=4, bonus=True, advanced=ADVANCED_FEATURES)  # bonus=True可选扩展
     print(f"特征维度: {X.shape}, 正样本比例: {y.mean():.2%}")
 
     # 3. 划分训练集/测试集
