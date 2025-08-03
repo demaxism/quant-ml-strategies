@@ -48,9 +48,11 @@ warnings.filterwarnings("ignore")
 
 # ====== 用户可调参数 ======
 ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
-BET_PROB_THRESHOLD = 0.85   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
+BET_PROB_THRESHOLD = 0.75   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
 RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
 FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
+TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
+STOP_LOSS = -0.01             # 止损百分比（如-0.01表示-1%止损）
 DATA_FILE = "data/LTC_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-1h.feather"
 
 
@@ -214,9 +216,10 @@ def train_xgb(X_train, y_train, X_test, y_test):
     print(f"准确率: {acc:.4f}  精确率: {prec:.4f}  召回率: {rec:.4f}")
     return model
 
-def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7):
+def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS, future_k=FUTURE_K_NUM):
     """
     回测：预测概率>prob_thres视为下注，统计命中率，并输出每次下注的信息
+    新增：资金曲线，止盈止损机制
     """
     y_prob = model.predict_proba(X_test)[:,1]
     bets = y_prob > prob_thres
@@ -225,15 +228,51 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7):
     hit_rate = hits / total_bets if total_bets > 0 else 0
     print(f"回测：下注次数={total_bets} 命中次数={hits} 命中率={hit_rate:.2%}")
 
-    # 输出每次下注的信息
+    # 盈亏与资金曲线
+    equity = [1.0]  # 初始资金为1
+    trade_pnl = []  # 每笔盈亏
     if df_test is not None:
         print("每次下注详情：")
-        print("idx\tdate\t\tprob\tlabel\tclose")
-        for idx in np.where(bets)[0]:
+        print("idx\tdate\t\tprob\tlabel\topen\tclose\tpnl")
+    for idx in np.where(bets)[0]:
+        if df_test is not None:
             date = df_test.iloc[idx]['date'] if 'date' in df_test.columns else ''
-            close = df_test.iloc[idx]['close'] if 'close' in df_test.columns else ''
-            print(f"{idx}\t{date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{close}")
-    return y_prob, bets
+        open_price = df_test.iloc[idx]['close'] if (df_test is not None and 'close' in df_test.columns) else 0
+        close_price = None
+        pnl = 0
+        # 止盈止损逻辑
+        hit = False
+        for k in range(1, future_k+1):
+            if idx + k >= len(df_test):
+                break
+            high = df_test.iloc[idx + k]['high']
+            low = df_test.iloc[idx + k]['low']
+            # 止盈
+            if high >= open_price * (1 + take_profit):
+                close_price = open_price * (1 + take_profit)
+                pnl = take_profit
+                hit = True
+                break
+            # 止损
+            if low <= open_price * (1 + stop_loss):
+                close_price = open_price * (1 + stop_loss)
+                pnl = stop_loss
+                hit = True
+                break
+        if not hit:
+            # 未触发止盈止损，按最后一根K线close价平仓
+            if idx + future_k < len(df_test):
+                close_price = df_test.iloc[idx + future_k]['close']
+                pnl = (close_price - open_price) / open_price
+            else:
+                close_price = open_price
+                pnl = 0
+        trade_pnl.append(pnl)
+        equity.append(equity[-1] * (1 + pnl))
+        if df_test is not None:
+            print(f"{idx}\t{date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}")
+    equity = np.array(equity)
+    return y_prob, bets, equity, trade_pnl
 
 def plot_shap(model, X, feature_names):
     """
@@ -262,6 +301,21 @@ def plot_bet_results(df, y_prob, bets, n_hist=4):
     plt.savefig("bet_visualization.png", dpi=200)
     plt.close()
     print("已保存下注可视化图：bet_visualization.png")
+
+def plot_equity_curve(equity):
+    """
+    绘制资金曲线
+    """
+    plt.figure(figsize=(12,6))
+    plt.plot(equity, label="Equity Curve")
+    plt.xlabel("Trade Number")
+    plt.ylabel("Equity")
+    plt.title("Backtest Equity Curve")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("equity_curve.png", dpi=200)
+    plt.close()
+    print("已保存资金曲线图：equity_curve.png")
 
 def main():
     # 1. 数据读取
@@ -300,7 +354,10 @@ def main():
     # 5. 回测模拟
     # 获取测试集对应的df行
     df_test = df.iloc[-len(y):].iloc[-len(y_test):].reset_index(drop=True)
-    y_prob, bets = backtest(model, X_test, y_test, df_test=df_test, prob_thres=BET_PROB_THRESHOLD)
+    y_prob, bets, equity, trade_pnl = backtest(
+        model, X_test, y_test, df_test=df_test, prob_thres=BET_PROB_THRESHOLD,
+        take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS, future_k=FUTURE_K_NUM
+    )
 
     # 6. 可选扩展：SHAP解释
     try:
@@ -313,6 +370,12 @@ def main():
         plot_bet_results(df.iloc[-len(y):], y_prob, bets, n_hist=n_hist)
     except Exception as e:
         print("下注可视化失败：", e)
+
+    # 8. 资金曲线可视化
+    try:
+        plot_equity_curve(equity)
+    except Exception as e:
+        print("资金曲线可视化失败：", e)
 
 if __name__ == "__main__":
     main()
