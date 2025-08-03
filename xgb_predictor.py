@@ -1,0 +1,195 @@
+# -*- coding: utf-8 -*-
+"""
+BTC 4h K线未来4根涨幅预测（XGBoost版）
+
+功能：
+1. 数据读取（支持feather/csv）
+2. 特征工程（前4根K线的OHLCV及可选特征）
+3. 目标变量：未来4根K线内最高价是否较当前收盘价涨1%
+4. XGBoost建模与评估
+5. 回测模拟
+6. 可选：SHAP解释与可视化
+
+作者：专业量化开发者
+"""
+
+import pandas as pd
+import numpy as np
+import xgboost as xgb
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+import matplotlib.pyplot as plt
+import shap
+import warnings
+import os
+
+warnings.filterwarnings("ignore")
+
+def load_data(file_path):
+    """
+    读取K线数据，支持feather和csv，按时间升序排序
+    """
+    ext = os.path.splitext(file_path)[-1]
+    if ext == '.feather':
+        df = pd.read_feather(file_path)
+    else:
+        df = pd.read_csv(file_path)
+    # 兼容字段名
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'])
+    elif 'time' in df.columns:
+        df['date'] = pd.to_datetime(df['time'])
+    else:
+        raise ValueError("找不到时间字段")
+    df = df.sort_values('date').reset_index(drop=True)
+    return df
+
+def add_features(df, n_hist=4, bonus=False):
+    """
+    提取特征：前n_hist根K线的OHLCV，可选bonus特征
+    """
+    feats = []
+    col_names = []
+    for i in range(n_hist, len(df)-4):
+        feat = []
+        for j in range(n_hist):
+            k = i - n_hist + j
+            # OHLCV
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                feat.append(df.iloc[k][col])
+                if i == n_hist:  # 只在第一次生成列名
+                    col_names.append(f'{col}_t-{n_hist-j}')
+            if bonus:
+                # 涨跌幅
+                ret = (df.iloc[k]['close'] - df.iloc[k]['open']) / df.iloc[k]['open']
+                feat.append(ret)
+                if i == n_hist:
+                    col_names.append(f'ret_t-{n_hist-j}')
+                # 实体长度
+                body = abs(df.iloc[k]['close'] - df.iloc[k]['open'])
+                feat.append(body)
+                if i == n_hist:
+                    col_names.append(f'body_t-{n_hist-j}')
+                # 上影线比例
+                upper = (df.iloc[k]['high'] - max(df.iloc[k]['open'], df.iloc[k]['close'])) / (df.iloc[k]['high'] - df.iloc[k]['low'] + 1e-8)
+                feat.append(upper)
+                if i == n_hist:
+                    col_names.append(f'upper_shadow_t-{n_hist-j}')
+                # 下影线比例
+                lower = (min(df.iloc[k]['open'], df.iloc[k]['close']) - df.iloc[k]['low']) / (df.iloc[k]['high'] - df.iloc[k]['low'] + 1e-8)
+                feat.append(lower)
+                if i == n_hist:
+                    col_names.append(f'lower_shadow_t-{n_hist-j}')
+        feats.append(feat)
+    X = np.array(feats)
+    if bonus:
+        n_feat = 20 + 4*3
+    else:
+        n_feat = 20
+    # 目标变量
+    y = []
+    for i in range(n_hist, len(df)-4):
+        cur_close = df.iloc[i]['close']
+        future_high = df.iloc[i+1:i+5]['high'].max()
+        label = 1 if (future_high - cur_close) / cur_close >= 0.01 else 0
+        y.append(label)
+    y = np.array(y)
+    return X, y, col_names
+
+def train_xgb(X_train, y_train, X_test, y_test):
+    """
+    训练XGBoost分类器，输出准确率、精确率、召回率
+    """
+    model = xgb.XGBClassifier(
+        n_estimators=100,
+        max_depth=4,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42,
+        use_label_encoder=False,
+        eval_metric='logloss'
+    )
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    prec = precision_score(y_test, y_pred, zero_division=0)
+    rec = recall_score(y_test, y_pred, zero_division=0)
+    print(f"准确率: {acc:.4f}  精确率: {prec:.4f}  召回率: {rec:.4f}")
+    return model
+
+def backtest(model, X_test, y_test, prob_thres=0.7):
+    """
+    回测：预测概率>prob_thres视为下注，统计命中率
+    """
+    y_prob = model.predict_proba(X_test)[:,1]
+    bets = y_prob > prob_thres
+    total_bets = bets.sum()
+    hits = ((y_test == 1) & bets).sum()
+    hit_rate = hits / total_bets if total_bets > 0 else 0
+    print(f"回测：下注次数={total_bets} 命中次数={hits} 命中率={hit_rate:.2%}")
+    return y_prob, bets
+
+def plot_shap(model, X, feature_names):
+    """
+    可选：画出SHAP特征重要性
+    """
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X)
+    shap.summary_plot(shap_values, X, feature_names=feature_names, show=False)
+    plt.tight_layout()
+    plt.savefig("shap_summary.png", dpi=200)
+    plt.close()
+    print("已保存SHAP特征重要性图：shap_summary.png")
+
+def plot_bet_results(df, y_prob, bets, n_hist=4):
+    """
+    可选：画出下注时机与实际涨幅的可视化
+    """
+    bet_idx = np.where(bets)[0]
+    plt.figure(figsize=(14,6))
+    plt.plot(df['date'][n_hist:len(df)-4], df['close'][n_hist:len(df)-4], label='Close')
+    plt.scatter(df['date'][n_hist:len(df)-4].iloc[bet_idx], df['close'][n_hist:len(df)-4].iloc[bet_idx], 
+                c='r', marker='^', label='Bet', s=60)
+    plt.title("下注时机与收盘价")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("bet_visualization.png", dpi=200)
+    plt.close()
+    print("已保存下注可视化图：bet_visualization.png")
+
+def main():
+    # 1. 数据读取
+    file_path = "data/BTC_USDT-4h.feather"  # 或 data.csv
+    df = load_data(file_path)
+    print(f"数据量: {len(df)}")
+
+    # 2. 特征工程
+    X, y, feature_names = add_features(df, n_hist=4, bonus=True)  # bonus=True可选扩展
+    print(f"特征维度: {X.shape}, 正样本比例: {y.mean():.2%}")
+
+    # 3. 划分训练集/测试集
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, shuffle=False  # 时间序列不打乱
+    )
+
+    # 4. 训练模型
+    model = train_xgb(X_train, y_train, X_test, y_test)
+
+    # 5. 回测模拟
+    y_prob, bets = backtest(model, X_test, y_test, prob_thres=0.7)
+
+    # 6. 可选扩展：SHAP解释
+    try:
+        plot_shap(model, X_train, feature_names)
+    except Exception as e:
+        print("SHAP绘图失败：", e)
+
+    # 7. 可选扩展：下注时机可视化
+    try:
+        plot_bet_results(df.iloc[-len(y):], y_prob, bets, n_hist=4)
+    except Exception as e:
+        print("下注可视化失败：", e)
+
+if __name__ == "__main__":
+    main()
