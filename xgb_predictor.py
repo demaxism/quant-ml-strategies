@@ -67,7 +67,7 @@ BET_PROB_THRESHOLD = 0.75   # 下注概率阈值（如0.7表示预测概率大�
 RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
 FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
 TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
-STOP_LOSS = -0.003             # 止损百分比（如-0.01表示-1%止损）
+STOP_LOSS = -0.01             # 止损百分比（如-0.01表示-1%止损）
 CRYPOTO_CURRENCY = "ETH"  # 可选：指定加密货币（如 "BTC", "ETH", "XRP" 等）
 DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
 FINE_DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-1h.feather"
@@ -253,6 +253,11 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
         print("每次下注详情：")
         print("idx\topen_date\tclose_date\tprob\tlabel\topen\tclose\tpnl")
     profit_count = 0  # 止盈次数统计
+    # 平仓方式计数
+    cross_count = 0   # 同时穿越止盈止损
+    tp_count = 0      # 止盈
+    sl_count = 0      # 止损
+    none_count = 0    # 未触发止盈止损
     for idx in np.where(bets)[0]:
         if df_test is not None:
             open_date = df_test.iloc[idx]['date'] if 'date' in df_test.columns else ''
@@ -298,6 +303,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 exit_idx = idx + k
                 log_print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t({result_str})")
                 log_print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}  止盈概率: {p_tp:.2f} 止损概率: {1-p_tp:.2f} 当前K线open: {cur_open:.2f}")
+                cross_count += 1
                 break
             # 止盈
             if high >= tp_price:
@@ -309,6 +315,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 exit_idx = idx + k
                 log_print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止盈)")
                 log_print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
+                tp_count += 1
                 break
             # 止损
             if low <= sl_price:
@@ -319,6 +326,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 exit_idx = idx + k
                 log_print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止损)")
                 log_print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
+                sl_count += 1
                 break
         if not hit:
             # 未触发止盈止损，按最后一根K线close价平仓
@@ -334,6 +342,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 exit_idx = idx
             log_print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(未触发止盈止损)")
             log_print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
+            none_count += 1
         # 统一打印详细K线信息
         if exit_idx is not None and exit_idx < len(df_test):
             for i in range(idx, exit_idx + 1):
@@ -349,6 +358,12 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
     if total_bets > 0:
         profit_ratio = profit_count / total_bets
         log_print(f"止盈交易占比: {profit_count}/{total_bets} = {profit_ratio:.2%}")
+    # 输出各种平仓方式的数量和比例
+    print("==== 平仓方式统计 ====")
+    print(f"同时穿越止盈止损: {cross_count} ({cross_count/total_bets:.2%} of bets)" if total_bets > 0 else f"同时穿越止盈止损: {cross_count} (0.00%)")
+    print(f"止盈: {tp_count} ({tp_count/total_bets:.2%} of bets)" if total_bets > 0 else f"止盈: {tp_count} (0.00%)")
+    print(f"止损: {sl_count} ({sl_count/total_bets:.2%} of bets)" if total_bets > 0 else f"止损: {sl_count} (0.00%)")
+    print(f"未触发止盈止损: {none_count} ({none_count/total_bets:.2%} of bets)" if total_bets > 0 else f"未触发止盈止损: {none_count} (0.00%)")
     equity = np.array(equity)
     return y_prob, bets, equity, trade_pnl
 
