@@ -62,16 +62,17 @@ warnings.filterwarnings("ignore")
 # prob是模型对“未来涨1%”的概率预测，label是实际是否涨了1%(RISE_THRESHOLD)（回测时已知）
 
 # ====== 用户可调参数 ======
-ADVANCED_FEATURES = True  # True: 启用技术指标和K线形态特征；False: 只用基础特征
+ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
 BET_PROB_THRESHOLD = 0.8   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
 RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
-FALL_THRESHOLD = -0.005       # 目标变量下跌幅度阈值（如-0.01表示-1%）
+FALL_THRESHOLD = -0.9       # 目标变量下跌幅度阈值（如-0.01表示-1%） 越大越好
 FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
 LOOKBACK_WINDOW = 16         # 用于特征提取的历史K线数量（如4表示用过去4根K线的特征，可调为3、5等）
 TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
 STOP_LOSS = -0.01             # 止损百分比（如-0.01表示-1%止损）
 CRYPOTO_CURRENCY = "ETH"  # 可选：指定加密货币（如 "BTC", "ETH", "XRP" 等）
-DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-1h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
+DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
+SUB_DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-1h.feather" 
 trade_pair = DATA_FILE.split('/')[-1].split('-')[0]  # 提取交易对名称，如 "LTC_USDT"
 
 
@@ -429,7 +430,43 @@ def plot_equity_curve(equity, df_test, bets):
     plt.close()
     print("已保存资金曲线图（含价格对比，双y轴）：equity_curve.png")
 
+def extract_timeframe_from_filename(filename):
+    """
+    从文件名中提取粒度字符串（如'4h', '1h', '15m', '1d'等）
+    """
+    import re
+    match = re.search(r'-(\d+[hm]|1d)\.', filename)
+    if match:
+        return match.group(1)
+    else:
+        raise ValueError(f"无法从文件名 {filename} 提取粒度")
+
+def parse_timeframe_to_minutes(timeframe_str):
+    """
+    将粒度字符串（如'4h', '1h', '15m', '1d'）转换为分钟数
+    """
+    if timeframe_str.endswith('h'):
+        return int(timeframe_str[:-1]) * 60
+    elif timeframe_str.endswith('m'):
+        return int(timeframe_str[:-1])
+    elif timeframe_str == '1d':
+        return 24 * 60
+    else:
+        raise ValueError(f"未知粒度格式: {timeframe_str}")
+
 def main():
+    # 1. 训练阶段（4h数据）
+    df_train = load_data(DATA_FILE)
+def main():
+    # 计算训练数据和回测数据的粒度倍率
+    train_timeframe = extract_timeframe_from_filename(DATA_FILE)
+    test_timeframe = extract_timeframe_from_filename(SUB_DATA_FILE)
+    train_granularity = parse_timeframe_to_minutes(train_timeframe)
+    test_granularity = parse_timeframe_to_minutes(test_timeframe)
+    granularity_multiplier = train_granularity // test_granularity
+    print(f"训练数据粒度: {train_timeframe} ({train_granularity}分钟), 回测数据粒度: {test_timeframe} ({test_granularity}分钟)")
+    print(f"粒度倍率（训练/回测）: {granularity_multiplier}")
+
     # 1. 训练阶段（4h数据）
     df_train = load_data(DATA_FILE)
     print(trade_pair)  # Output: BTC_USDT
