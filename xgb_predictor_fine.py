@@ -66,6 +66,7 @@ ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False
 BET_PROB_THRESHOLD = 0.8   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
 RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
 FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
+LOOKBACK_WINDOW = 13         # 用于特征提取的历史K线数量（如4表示用过去4根K线的特征，可调为3、5等）
 TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
 STOP_LOSS = -0.01             # 止损百分比（如-0.01表示-1%止损）
 CRYPOTO_CURRENCY = "LTC"  # 可选：指定加密货币（如 "BTC", "ETH", "XRP" 等）
@@ -126,10 +127,11 @@ def is_hammer(open_, high_, low_, close_):
     lower = min(open_, close_) - low_
     return int(body < (high_ - low_) * 0.3 and lower > 2 * body and upper < body)
 
-def add_features(df, n_hist=4, bonus=False, advanced=True, rise_threshold=RISE_THRESHOLD, future_k=FUTURE_K_NUM):
+def add_features(df, lookback_window=LOOKBACK_WINDOW, bonus=False, advanced=True, rise_threshold=RISE_THRESHOLD, future_k=FUTURE_K_NUM):
     """
-    提取特征：前n_hist根K线的OHLCV、技术指标、K线形态特征
+    提取特征：前lookback_window根K线的OHLCV、技术指标、K线形态特征
     advanced=True时启用技术指标和K线形态特征，否则只用基础特征
+    lookback_window: 用于特征提取的历史K线数量（如4表示用过去4根K线的特征）
     rise_threshold: 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
     future_k: 目标变量观察的未来K线数量（如4表示未来4根K线）
     """
@@ -148,21 +150,21 @@ def add_features(df, n_hist=4, bonus=False, advanced=True, rise_threshold=RISE_T
 
     feats = []
     col_names = []
-    for i in range(n_hist, len(df)-future_k):
+    for i in range(lookback_window, len(df)-future_k):
         feat = []
-        for j in range(n_hist):
-            k_idx = i - n_hist + j
+        for j in range(lookback_window):
+            k_idx = i - lookback_window + j
             # OHLCV
             for col in ['open', 'high', 'low', 'close', 'volume']:
                 feat.append(df.iloc[k_idx][col])
-                if i == n_hist:
-                    col_names.append(f'{col}_t-{n_hist-j}')
+                if i == lookback_window:
+                    col_names.append(f'{col}_t-{lookback_window-j}')
             if advanced:
                 # 技术指标
                 for col in ['rsi', 'macd', 'macd_signal', 'macd_hist', 'kdj_k', 'kdj_d', 'kdj_j']:
                     feat.append(df.iloc[k_idx][col])
-                    if i == n_hist:
-                        col_names.append(f'{col}_t-{n_hist-j}')
+                    if i == lookback_window:
+                        col_names.append(f'{col}_t-{lookback_window-j}')
                 # K线形态特征
                 open_ = df.iloc[k_idx]['open']
                 high_ = df.iloc[k_idx]['high']
@@ -170,40 +172,40 @@ def add_features(df, n_hist=4, bonus=False, advanced=True, rise_threshold=RISE_T
                 close_ = df.iloc[k_idx]['close']
                 # 阳线/阴线
                 feat.append(is_bullish(open_, close_))
-                if i == n_hist:
-                    col_names.append(f'is_bullish_t-{n_hist-j}')
+                if i == lookback_window:
+                    col_names.append(f'is_bullish_t-{lookback_window-j}')
                 # 锤头
                 feat.append(is_hammer(open_, high_, low_, close_))
-                if i == n_hist:
-                    col_names.append(f'is_hammer_t-{n_hist-j}')
+                if i == lookback_window:
+                    col_names.append(f'is_hammer_t-{lookback_window-j}')
                 # 实体长度
                 body = abs(close_ - open_)
                 feat.append(body)
-                if i == n_hist:
-                    col_names.append(f'body_t-{n_hist-j}')
+                if i == lookback_window:
+                    col_names.append(f'body_t-{lookback_window-j}')
                 # 上影线比例
                 upper = (high_ - max(open_, close_)) / (high_ - low_ + 1e-8)
                 feat.append(upper)
-                if i == n_hist:
-                    col_names.append(f'upper_shadow_t-{n_hist-j}')
+                if i == lookback_window:
+                    col_names.append(f'upper_shadow_t-{lookback_window-j}')
                 # 下影线比例
                 lower = (min(open_, close_) - low_) / (high_ - low_ + 1e-8)
                 feat.append(lower)
-                if i == n_hist:
-                    col_names.append(f'lower_shadow_t-{n_hist-j}')
+                if i == lookback_window:
+                    col_names.append(f'lower_shadow_t-{lookback_window-j}')
             if bonus:
                 open_ = df.iloc[k_idx]['open']
                 close_ = df.iloc[k_idx]['close']
                 # 涨跌幅
                 ret = (close_ - open_) / (open_ + 1e-8)
                 feat.append(ret)
-                if i == n_hist:
-                    col_names.append(f'ret_t-{n_hist-j}')
+                if i == lookback_window:
+                    col_names.append(f'ret_t-{lookback_window-j}')
         feats.append(feat)
     X = np.array(feats)
     # 目标变量
     y = []
-    for i in range(n_hist, len(df)-future_k):
+    for i in range(lookback_window, len(df)-future_k):
         cur_close = df.iloc[i]['close']
         future_high = df.iloc[i+1:i+1+future_k]['high'].max()
         label = 1 if (future_high - cur_close) / cur_close >= rise_threshold else 0
@@ -429,9 +431,8 @@ def main():
     print(trade_pair)  # Output: BTC_USDT
     print(f"训练数据量: {len(df_train)}")
 
-    n_hist = 4
     X, y, feature_names = add_features(
-        df_train, n_hist=n_hist, bonus=True, advanced=ADVANCED_FEATURES,
+        df_train, lookback_window=LOOKBACK_WINDOW, bonus=True, advanced=ADVANCED_FEATURES,
         rise_threshold=RISE_THRESHOLD, future_k=FUTURE_K_NUM
     )
     print(f"训练特征维度: {X.shape}, 正样本比例: {y.mean():.2%}")
@@ -444,7 +445,7 @@ def main():
     total = len(y)
     train_size = len(y_train)
     test_size = len(y_test)
-    date_feat = df_train['date'].iloc[n_hist:len(df_train)-FUTURE_K_NUM].reset_index(drop=True)
+    date_feat = df_train['date'].iloc[LOOKBACK_WINDOW:len(df_train)-FUTURE_K_NUM].reset_index(drop=True)
     train_dates = date_feat.iloc[:train_size]
     test_dates = date_feat.iloc[train_size:]
     print(f"训练集日期区间: {train_dates.iloc[0]} ~ {train_dates.iloc[-1]}")
@@ -456,7 +457,7 @@ def main():
     model = train_xgb(X_train, y_train, X_test, y_test)
 
     # 2. 回测阶段（直接用4h测试集）
-    df_test = df_train.iloc[n_hist+train_size:n_hist+train_size+test_size].reset_index(drop=True)
+    df_test = df_train.iloc[LOOKBACK_WINDOW+train_size:LOOKBACK_WINDOW+train_size+test_size].reset_index(drop=True)
     y_prob, bets, equity, trade_pnl = backtest(
         model, X_test, y_test, df_test=df_test,
         prob_thres=BET_PROB_THRESHOLD, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS, future_k=FUTURE_K_NUM
@@ -470,7 +471,7 @@ def main():
 
     # 可选扩展：下注时机可视化
     try:
-        plot_bet_results(df_test, y_prob, bets, n_hist=n_hist)
+        plot_bet_results(df_test, y_prob, bets, n_hist=LOOKBACK_WINDOW)
     except Exception as e:
         print("下注可视化失败：", e)
 
