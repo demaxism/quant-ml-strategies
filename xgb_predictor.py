@@ -13,6 +13,7 @@ BTC 4h K线未来4根涨幅预测（XGBoost版）
 作者：专业量化开发者
 """
 
+from fileinput import filename
 import pandas as pd
 import numpy as np
 import xgboost as xgb
@@ -55,6 +56,7 @@ TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
 STOP_LOSS = -0.003             # 止损百分比（如-0.01表示-1%止损）
 DATA_FILE = "data/LTC_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
 FINE_DATA_FILE = "data/LTC_USDT-1h.feather"
+trade_pair = DATA_FILE.split('/')[-1].split('-')[0]  # 提取交易对名称，如 "LTC_USDT"
 
 
 def load_data(file_path):
@@ -372,7 +374,7 @@ def plot_equity_curve(equity, df_test, bets):
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
-    plt.title("Backtest Equity Curve vs Price")
+    plt.title(f"Backtest Equity Curve vs {trade_pair} Price")
     plt.tight_layout()
     plt.savefig("equity_curve.png", dpi=200)
     plt.close()
@@ -381,6 +383,7 @@ def plot_equity_curve(equity, df_test, bets):
 def main():
     # 1. 训练阶段（4h数据）
     df_train = load_data(DATA_FILE)
+    print(trade_pair)  # Output: BTC_USDT
     print(f"训练数据量: {len(df_train)}")
 
     n_hist = 4
