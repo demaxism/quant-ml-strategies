@@ -52,8 +52,9 @@ BET_PROB_THRESHOLD = 0.75   # 下注概率阈值（如0.7表示预测概率大�
 RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
 FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
 TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
-STOP_LOSS = -0.01             # 止损百分比（如-0.01表示-1%止损）
-DATA_FILE = "data/LTC_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-1h.feather"
+STOP_LOSS = -0.003             # 止损百分比（如-0.01表示-1%止损）
+DATA_FILE = "data/ETH_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
+FINE_DATA_FILE = "data/ETH_USDT-1h.feather"
 
 
 def load_data(file_path):
@@ -327,60 +328,84 @@ def plot_equity_curve(equity):
     print("已保存资金曲线图：equity_curve.png")
 
 def main():
-    # 1. 数据读取
-    df = load_data(DATA_FILE)
-    print(f"数据量: {len(df)}")
+    # 1. 训练阶段（4h数据）
+    df_train = load_data(DATA_FILE)
+    print(f"训练数据量: {len(df_train)}")
 
-    # 2. 特征工程
     n_hist = 4
     X, y, feature_names = add_features(
-        df, n_hist=n_hist, bonus=True, advanced=ADVANCED_FEATURES,
+        df_train, n_hist=n_hist, bonus=True, advanced=ADVANCED_FEATURES,
         rise_threshold=RISE_THRESHOLD, future_k=FUTURE_K_NUM
-    )  # bonus=True可选扩展
-    print(f"特征维度: {X.shape}, 正样本比例: {y.mean():.2%}")
+    )
+    print(f"训练特征维度: {X.shape}, 正样本比例: {y.mean():.2%}")
 
-    # 3. 划分训练集/测试集
+    # 时间序列分割
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, shuffle=False  # 时间序列不打乱
+        X, y, test_size=0.2, shuffle=False
     )
 
-    # 输出训练集和回测集的日期区间
     total = len(y)
     train_size = len(y_train)
     test_size = len(y_test)
-    # 特征和标签起始于 df[n_hist:len(df)-4]
-    date_feat = df['date'].iloc[n_hist:len(df)-4].reset_index(drop=True)
+    date_feat = df_train['date'].iloc[n_hist:len(df_train)-FUTURE_K_NUM].reset_index(drop=True)
     train_dates = date_feat.iloc[:train_size]
     test_dates = date_feat.iloc[train_size:]
     print(f"训练集日期区间: {train_dates.iloc[0]} ~ {train_dates.iloc[-1]}")
-    print(f"回测集日期区间: {test_dates.iloc[0]} ~ {test_dates.iloc[-1]}")
-    print(f"回测集区间价格始值: {df['close'].iloc[test_dates.index[0]]}")
-    print(f"回测集区间价格终值: {df['close'].iloc[test_dates.index[-1]]}")
+    print(f"回测集（4h）日期区间: {test_dates.iloc[0]} ~ {test_dates.iloc[-1]}")
+    print(f"回测集区间价格始值: {df_train['close'].iloc[test_dates.index[0]]}")
+    print(f"回测集区间价格终值: {df_train['close'].iloc[test_dates.index[-1]]}")
 
-    # 4. 训练模型
+    # 训练模型
     model = train_xgb(X_train, y_train, X_test, y_test)
 
-    # 5. 回测模拟
-    # 获取测试集对应的df行
-    df_test = df.iloc[-len(y):].iloc[-len(y_test):].reset_index(drop=True)
+    # 2. 回测阶段（1h数据，粒度更细，时间段不重叠）
+    df_fine = load_data(FINE_DATA_FILE)
+    print(f"回测数据量（细粒度）: {len(df_fine)}")
+
+    # 取回测起始时间（4h训练集最后一根K线的date之后）
+    last_train_date = train_dates.iloc[-1]
+    df_fine_bt = df_fine[df_fine['date'] > last_train_date].reset_index(drop=True)
+    print(f"细粒度回测区间: {df_fine_bt['date'].iloc[0]} ~ {df_fine_bt['date'].iloc[-1]}")
+
+    # 预测窗口放大（如4*4=16根1h）
+    fine_future_k = FUTURE_K_NUM * 4  # 假设4h:1h=4:1
+    X_fine, y_fine, feature_names_fine = add_features(
+        df_fine_bt, n_hist=n_hist, bonus=True, advanced=ADVANCED_FEATURES,
+        rise_threshold=RISE_THRESHOLD, future_k=fine_future_k
+    )
+    print(f"细粒度回测特征维度: {X_fine.shape}, 正样本比例: {y_fine.mean():.2%}")
+
+    # 对齐df_test长度
+    df_test = df_fine_bt.iloc[n_hist:len(df_fine_bt)-fine_future_k].reset_index(drop=True)
+    print(f"df_test shape: {df_test.shape}, X_fine shape: {X_fine.shape}, y_fine shape: {y_fine.shape}")
+
+    # 检查shape一致性
+    if not (len(df_test) == X_fine.shape[0] == y_fine.shape[0]):
+        print("警告：df_test、X_fine、y_fine长度不一致，请检查数据对齐！")
+        min_len = min(len(df_test), X_fine.shape[0], y_fine.shape[0])
+        df_test = df_test.iloc[:min_len]
+        X_fine = X_fine[:min_len]
+        y_fine = y_fine[:min_len]
+
+    # 回测
     y_prob, bets, equity, trade_pnl = backtest(
-        model, X_test, y_test, df_test=df_test, prob_thres=BET_PROB_THRESHOLD,
-        take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS, future_k=FUTURE_K_NUM
+        model, X_fine, y_fine, df_test=df_test,
+        prob_thres=BET_PROB_THRESHOLD, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS, future_k=fine_future_k
     )
 
-    # 6. 可选扩展：SHAP解释
+    # 可选扩展：SHAP解释
     try:
         plot_shap(model, X_train, feature_names)
     except Exception as e:
         print("SHAP绘图失败：", e)
 
-    # 7. 可选扩展：下注时机可视化
+    # 可选扩展：下注时机可视化
     try:
-        plot_bet_results(df.iloc[-len(y):], y_prob, bets, n_hist=n_hist)
+        plot_bet_results(df_test, y_prob, bets, n_hist=n_hist)
     except Exception as e:
         print("下注可视化失败：", e)
 
-    # 8. 资金曲线可视化
+    # 资金曲线可视化
     try:
         plot_equity_curve(equity)
     except Exception as e:
