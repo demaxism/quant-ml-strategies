@@ -67,7 +67,7 @@ BET_PROB_THRESHOLD = 0.8   # 下注概率阈值（如0.7表示预测概率大于
 RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
 FALL_THRESHOLD = -0.9       # 目标变量下跌幅度阈值（如-0.01表示-1%） 越大越好
 FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
-LOOKBACK_WINDOW = 16         # 用于特征提取的历史K线数量（如4表示用过去4根K线的特征，可调为3、5等）
+LOOKBACK_WINDOW = 4         # 用于特征提取的历史K线数量（如4表示用过去4根K线的特征，可调为3、5等）
 TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
 STOP_LOSS = -0.01             # 止损百分比（如-0.01表示-1%止损）
 CRYPOTO_CURRENCY = "ETH"  # 可选：指定加密货币（如 "BTC", "ETH", "XRP" 等）
@@ -455,9 +455,6 @@ def parse_timeframe_to_minutes(timeframe_str):
         raise ValueError(f"未知粒度格式: {timeframe_str}")
 
 def main():
-    # 1. 训练阶段（4h数据）
-    df_train = load_data(DATA_FILE)
-def main():
     # 计算训练数据和回测数据的粒度倍率
     train_timeframe = extract_timeframe_from_filename(DATA_FILE)
     test_timeframe = extract_timeframe_from_filename(SUB_DATA_FILE)
@@ -467,38 +464,52 @@ def main():
     print(f"训练数据粒度: {train_timeframe} ({train_granularity}分钟), 回测数据粒度: {test_timeframe} ({test_granularity}分钟)")
     print(f"粒度倍率（训练/回测）: {granularity_multiplier}")
 
-    # 1. 训练阶段（4h数据）
-    df_train = load_data(DATA_FILE)
-    print(trade_pair)  # Output: BTC_USDT
-    print(f"训练数据量: {len(df_train)}")
+    # 1. 加载原始训练数据和细粒度数据
+    df_coarse = load_data(DATA_FILE)
+    df_fine = load_data(SUB_DATA_FILE)
+    print(trade_pair)
+    print(f"原训练数据量: {len(df_coarse)}")
+    print(f"细粒度数据量: {len(df_fine)}")
 
-    X, y, feature_names = add_features(
-        df_train, lookback_window=LOOKBACK_WINDOW, bonus=True, advanced=ADVANCED_FEATURES,
+    # 用原训练数据确定测试集时间区间
+    X_coarse, y_coarse, _ = add_features(
+        df_coarse, lookback_window=LOOKBACK_WINDOW, bonus=True, advanced=ADVANCED_FEATURES,
         rise_threshold=RISE_THRESHOLD, future_k=FUTURE_K_NUM
     )
-    print(f"训练特征维度: {X.shape}, 正样本比例: {y.mean():.2%}")
-
-    # 时间序列分割
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, shuffle=False
+    X_train_coarse, X_test_coarse, y_train_coarse, y_test_coarse = train_test_split(
+        X_coarse, y_coarse, test_size=0.2, shuffle=False
     )
+    date_feat_coarse = df_coarse['date'].iloc[LOOKBACK_WINDOW:len(df_coarse)-FUTURE_K_NUM].reset_index(drop=True)
+    train_dates_coarse = date_feat_coarse.iloc[:len(y_train_coarse)]
+    test_dates_coarse = date_feat_coarse.iloc[len(y_train_coarse):]
+    test_start = test_dates_coarse.iloc[0]
+    test_end = test_dates_coarse.iloc[-1]
+    print(f"原训练集日期区间: {train_dates_coarse.iloc[0]} ~ {train_dates_coarse.iloc[-1]}")
+    print(f"原回测集日期区间: {test_start} ~ {test_end}")
 
-    total = len(y)
-    train_size = len(y_train)
-    test_size = len(y_test)
-    date_feat = df_train['date'].iloc[LOOKBACK_WINDOW:len(df_train)-FUTURE_K_NUM].reset_index(drop=True)
-    train_dates = date_feat.iloc[:train_size]
-    test_dates = date_feat.iloc[train_size:]
-    print(f"训练集日期区间: {train_dates.iloc[0]} ~ {train_dates.iloc[-1]}")
-    print(f"回测集（4h）日期区间: {test_dates.iloc[0]} ~ {test_dates.iloc[-1]}")
-    print(f"回测集区间价格始值: {df_train['close'].iloc[test_dates.index[0]]}")
-    print(f"回测集区间价格终值: {df_train['close'].iloc[test_dates.index[-1]]}")
+    # 用细粒度数据做特征工程
+    X_fine, y_fine, feature_names = add_features(
+        df_fine, lookback_window=LOOKBACK_WINDOW, bonus=True, advanced=ADVANCED_FEATURES,
+        rise_threshold=RISE_THRESHOLD, future_k=FUTURE_K_NUM
+    )
+    date_feat_fine = df_fine['date'].iloc[LOOKBACK_WINDOW:len(df_fine)-FUTURE_K_NUM].reset_index(drop=True)
+
+    # 用原训练集的测试区间在细粒度数据中切分
+    train_mask_fine = date_feat_fine < test_start
+    test_mask_fine = (date_feat_fine >= test_start) & (date_feat_fine <= test_end)
+    X_train, y_train = X_fine[train_mask_fine], y_fine[train_mask_fine]
+    X_test, y_test = X_fine[test_mask_fine], y_fine[test_mask_fine]
+    test_dates_fine = date_feat_fine[test_mask_fine]
+    print(f"细粒度训练集样本数: {len(y_train)}")
+    print(f"细粒度测试集样本数: {len(y_test)}")
+    print(f"细粒度测试集日期区间: {test_dates_fine.iloc[0]} ~ {test_dates_fine.iloc[-1]}")
 
     # 训练模型
     model = train_xgb(X_train, y_train, X_test, y_test)
 
-    # 2. 回测阶段（直接用4h测试集）
-    df_test = df_train.iloc[LOOKBACK_WINDOW+train_size:LOOKBACK_WINDOW+train_size+test_size].reset_index(drop=True)
+    # 2. 回测阶段（用细粒度测试集）
+    df_test = df_fine.iloc[LOOKBACK_WINDOW:len(df_fine)-FUTURE_K_NUM].reset_index(drop=True)
+    df_test = df_test[test_mask_fine].reset_index(drop=True)
     y_prob, bets, equity, trade_pnl = backtest(
         model, X_test, y_test, df_test=df_test,
         prob_thres=BET_PROB_THRESHOLD, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS, future_k=FUTURE_K_NUM
