@@ -235,6 +235,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
     if df_test is not None:
         print("每次下注详情：")
         print("idx\topen_date\tclose_date\tprob\tlabel\topen\tclose\tpnl")
+    profit_count = 0  # 止盈次数统计
     for idx in np.where(bets)[0]:
         if df_test is not None:
             open_date = df_test.iloc[idx]['date'] if 'date' in df_test.columns else ''
@@ -267,6 +268,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 pnl = take_profit
                 close_date = df_test.iloc[idx + k]['date']
                 hit = True
+                profit_count += 1
                 print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止盈)")
                 break
             # 止损
@@ -290,6 +292,9 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
             print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(未触发止盈止损)")
         trade_pnl.append(pnl)
         equity.append(equity[-1] * (1 + pnl))
+    if total_bets > 0:
+        profit_ratio = profit_count / total_bets
+        print(f"止盈交易占比: {profit_count}/{total_bets} = {profit_ratio:.2%}")
     equity = np.array(equity)
     return y_prob, bets, equity, trade_pnl
 
