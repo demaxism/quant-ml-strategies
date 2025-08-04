@@ -14,6 +14,7 @@ BTC 4h K线未来4根涨幅预测（XGBoost版）
 """
 
 from fileinput import filename
+import random
 import pandas as pd
 import numpy as np
 import xgboost as xgb
@@ -85,9 +86,8 @@ RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%�
 FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
 TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
 STOP_LOSS = -0.003             # 止损百分比（如-0.01表示-1%止损）
-CRYPOTO_CURRENCY = "ETH"  # 可选：指定加密货币（如 "BTC", "ETH", "XRP" 等）
-DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
-FINE_DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-1h.feather"
+DATA_FILE = "data/LTC_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
+FINE_DATA_FILE = "data/LTC_USDT-1h.feather"
 trade_pair = DATA_FILE.split('/')[-1].split('-')[0]  # 提取交易对名称，如 "LTC_USDT"
 
 
@@ -292,15 +292,29 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
             low = df_test.iloc[idx + k]['low']
             tp_price = open_price * (1 + take_profit)
             sl_price = open_price * (1 + stop_loss)
-            # 同时穿越止盈止损，采用中间法（平均法）
+            # 同时穿越止盈止损，按当前K线open价到止盈止损点的距离分配概率
             if high >= tp_price and low <= sl_price:
-                pnl = (take_profit + stop_loss) / 2
-                close_price = open_price * (1 + pnl)
+                cur_open = df_test.iloc[idx + k]['open']
+                d_tp = abs(tp_price - cur_open)
+                d_sl = abs(sl_price - cur_open)
+                total = d_tp + d_sl
+                if total == 0:
+                    p_tp = 0.5
+                else:
+                    p_tp = d_sl / total
+                if random.random() < p_tp:
+                    pnl = take_profit
+                    close_price = open_price * (1 + pnl)
+                    result_str = "止盈(距离加权, 当前K线open)"
+                else:
+                    pnl = stop_loss
+                    close_price = open_price * (1 + pnl)
+                    result_str = "止损(距离加权, 当前K线open)"
                 close_date = df_test.iloc[idx + k]['date']
                 hit = True
                 exit_idx = idx + k
-                log_print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(平均法成交)")
-                log_print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
+                log_print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t({result_str})")
+                log_print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}  止盈概率: {p_tp:.2f} 止损概率: {1-p_tp:.2f} 当前K线open: {cur_open:.2f}")
                 break
             # 止盈
             if high >= tp_price:
