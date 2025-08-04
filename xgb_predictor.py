@@ -234,12 +234,15 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
     trade_pnl = []  # 每笔盈亏
     if df_test is not None:
         print("每次下注详情：")
-        print("idx\tdate\t\tprob\tlabel\topen\tclose\tpnl")
+        print("idx\topen_date\tclose_date\tprob\tlabel\topen\tclose\tpnl")
     for idx in np.where(bets)[0]:
         if df_test is not None:
-            date = df_test.iloc[idx]['date'] if 'date' in df_test.columns else ''
+            open_date = df_test.iloc[idx]['date'] if 'date' in df_test.columns else ''
+        else:
+            open_date = ''
         open_price = df_test.iloc[idx]['close'] if (df_test is not None and 'close' in df_test.columns) else 0
         close_price = None
+        close_date = ''
         pnl = 0
         # 止盈止损逻辑
         hit = False
@@ -254,32 +257,37 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
             if high >= tp_price and low <= sl_price:
                 pnl = (take_profit + stop_loss) / 2
                 close_price = open_price * (1 + pnl)
+                close_date = df_test.iloc[idx + k]['date']
                 hit = True
-                print(f"{idx}\t{date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(平均法成交)")
+                print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(平均法成交)")
                 break
             # 止盈
             if high >= tp_price:
                 close_price = tp_price
                 pnl = take_profit
+                close_date = df_test.iloc[idx + k]['date']
                 hit = True
-                print(f"{idx}\t{date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止盈)")
+                print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止盈)")
                 break
             # 止损
             if low <= sl_price:
                 close_price = sl_price
                 pnl = stop_loss
+                close_date = df_test.iloc[idx + k]['date']
                 hit = True
-                print(f"{idx}\t{date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止损)")
+                print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止损)")
                 break
         if not hit:
             # 未触发止盈止损，按最后一根K线close价平仓
             if idx + future_k < len(df_test):
                 close_price = df_test.iloc[idx + future_k]['close']
+                close_date = df_test.iloc[idx + future_k]['date']
                 pnl = (close_price - open_price) / open_price
             else:
                 close_price = open_price
+                close_date = open_date
                 pnl = 0
-            print(f"{idx}\t{date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(未触发止盈止损)")
+            print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(未触发止盈止损)")
         trade_pnl.append(pnl)
         equity.append(equity[-1] * (1 + pnl))
     equity = np.array(equity)
