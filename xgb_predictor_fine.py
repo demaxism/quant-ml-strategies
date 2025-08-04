@@ -471,8 +471,8 @@ def main():
     print(f"原训练数据量: {len(df_coarse)}")
     print(f"细粒度数据量: {len(df_fine)}")
 
-    # 用原训练数据确定测试集时间区间
-    X_coarse, y_coarse, _ = add_features(
+    # 1. 只对原粒度数据做特征工程和训练
+    X_coarse, y_coarse, feature_names = add_features(
         df_coarse, lookback_window=LOOKBACK_WINDOW, bonus=True, advanced=ADVANCED_FEATURES,
         rise_threshold=RISE_THRESHOLD, future_k=FUTURE_K_NUM
     )
@@ -487,49 +487,64 @@ def main():
     print(f"原训练集日期区间: {train_dates_coarse.iloc[0]} ~ {train_dates_coarse.iloc[-1]}")
     print(f"原回测集日期区间: {test_start} ~ {test_end}")
 
-    # 用细粒度数据做特征工程
-    X_fine, y_fine, feature_names = add_features(
+    # 训练模型（只用原粒度特征）
+    model = train_xgb(X_train_coarse, y_train_coarse, X_test_coarse, y_test_coarse)
+
+    # 2. 回测阶段：细粒度数据只用于回测，不做特征工程和训练
+    # 用滑动窗口方式对细粒度数据提取特征，并用训练好的模型做推理和回测
+    print(f"细粒度数据回测区间: {test_start} ~ {test_end}")
+
+    # 提取细粒度特征和标签
+    X_fine, y_fine, feature_names_fine = add_features(
         df_fine, lookback_window=LOOKBACK_WINDOW, bonus=True, advanced=ADVANCED_FEATURES,
         rise_threshold=RISE_THRESHOLD, future_k=FUTURE_K_NUM
     )
+    # 对齐细粒度特征的日期
     date_feat_fine = df_fine['date'].iloc[LOOKBACK_WINDOW:len(df_fine)-FUTURE_K_NUM].reset_index(drop=True)
-
-    # 用原训练集的测试区间在细粒度数据中切分
-    train_mask_fine = date_feat_fine < test_start
     test_mask_fine = (date_feat_fine >= test_start) & (date_feat_fine <= test_end)
-    X_train, y_train = X_fine[train_mask_fine], y_fine[train_mask_fine]
-    X_test, y_test = X_fine[test_mask_fine], y_fine[test_mask_fine]
-    test_dates_fine = date_feat_fine[test_mask_fine]
-    print(f"细粒度训练集样本数: {len(y_train)}")
-    print(f"细粒度测试集样本数: {len(y_test)}")
-    print(f"细粒度测试集日期区间: {test_dates_fine.iloc[0]} ~ {test_dates_fine.iloc[-1]}")
+    X_fine_test = X_fine[test_mask_fine]
+    y_fine_test = y_fine[test_mask_fine]
+    df_fine_test = df_fine.iloc[LOOKBACK_WINDOW:len(df_fine)-FUTURE_K_NUM].reset_index(drop=True)
+    df_fine_test = df_fine_test[test_mask_fine].reset_index(drop=True)
 
-    # 训练模型
-    model = train_xgb(X_train, y_train, X_test, y_test)
+    print(f"细粒度回测样本数: {len(y_fine_test)}")
+    if len(y_fine_test) == 0:
+        print("细粒度区间无可用样本，跳过回测。")
+    else:
+        y_prob_fine, bets_fine, equity_fine, trade_pnl_fine = backtest(
+            model, X_fine_test, y_fine_test, df_test=df_fine_test,
+            prob_thres=BET_PROB_THRESHOLD, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS, future_k=FUTURE_K_NUM
+        )
+        # 可选：细粒度下注可视化
+        try:
+            plot_bet_results(df_fine_test, y_prob_fine, bets_fine, n_hist=LOOKBACK_WINDOW)
+        except Exception as e:
+            print("细粒度下注可视化失败：", e)
+        # 可选：细粒度资金曲线
+        try:
+            plot_equity_curve(equity_fine, df_fine_test, bets_fine)
+        except Exception as e:
+            print("细粒度资金曲线可视化失败：", e)
 
-    # 2. 回测阶段（用细粒度测试集）
-    df_test = df_fine.iloc[LOOKBACK_WINDOW:len(df_fine)-FUTURE_K_NUM].reset_index(drop=True)
-    df_test = df_test[test_mask_fine].reset_index(drop=True)
-    y_prob, bets, equity, trade_pnl = backtest(
-        model, X_test, y_test, df_test=df_test,
-        prob_thres=BET_PROB_THRESHOLD, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS, future_k=FUTURE_K_NUM
-    )
-
-    # 可选扩展：SHAP解释
+    # 可选扩展：SHAP解释（基于原粒度特征）
     try:
-        plot_shap(model, X_train, feature_names)
+        plot_shap(model, X_train_coarse, feature_names)
     except Exception as e:
         print("SHAP绘图失败：", e)
 
-    # 可选扩展：下注时机可视化
+    # 可选扩展：下注时机可视化（基于原粒度测试集）
     try:
-        plot_bet_results(df_test, y_prob, bets, n_hist=LOOKBACK_WINDOW)
+        plot_bet_results(df_coarse.iloc[LOOKBACK_WINDOW:len(df_coarse)-FUTURE_K_NUM].reset_index(drop=True), 
+                         model.predict_proba(X_test_coarse)[:,1], 
+                         model.predict(X_test_coarse) > BET_PROB_THRESHOLD, 
+                         n_hist=LOOKBACK_WINDOW)
     except Exception as e:
         print("下注可视化失败：", e)
 
-    # 资金曲线可视化
+    # 资金曲线可视化（基于原粒度测试集）
     try:
-        plot_equity_curve(equity, df_test, bets)
+        plot_equity_curve([1.0], df_coarse.iloc[LOOKBACK_WINDOW:len(df_coarse)-FUTURE_K_NUM].reset_index(drop=True), 
+                          model.predict(X_test_coarse) > BET_PROB_THRESHOLD)
     except Exception as e:
         print("资金曲线可视化失败：", e)
 
