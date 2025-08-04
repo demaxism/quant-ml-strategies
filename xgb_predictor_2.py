@@ -62,16 +62,16 @@ warnings.filterwarnings("ignore")
 # prob是模型对“未来涨1%”的概率预测，label是实际是否涨了1%(RISE_THRESHOLD)（回测时已知）
 
 # ====== 用户可调参数 ======
-ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
+ADVANCED_FEATURES = True  # True: 启用技术指标和K线形态特征；False: 只用基础特征
 BET_PROB_THRESHOLD = 0.8   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
-RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
-FALL_THRESHOLD = -1       # 目标变量下跌幅度阈值（如-0.01表示-1%） 越大越好
-FUTURE_K_NUM = 12            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
-LOOKBACK_WINDOW = 20         # 用于特征提取的历史K线数量（如4表示用过去4根K线的特征，可调为3、5等）
+RISE_THRESHOLD = 0.02       # 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
+FALL_THRESHOLD = -0.9       # 目标变量下跌幅度阈值（如-0.01表示-1%） 越大越好
+FUTURE_K_NUM = 10            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
+LOOKBACK_WINDOW = 12         # 用于特征提取的历史K线数量（如4表示用过去4根K线的特征，可调为3、5等）
 TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
-STOP_LOSS = -0.01             # 止损百分比（如-0.01表示-1%止损）
+STOP_LOSS = -0.02             # 止损百分比（如-0.01表示-1%止损）
 CRYPOTO_CURRENCY = "ETH"  # 可选：指定加密货币（如 "BTC", "ETH", "XRP" 等）
-DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-1h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
+DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
 trade_pair = DATA_FILE.split('/')[-1].split('-')[0]  # 提取交易对名称，如 "LTC_USDT"
 
 def load_data(file_path):
@@ -423,6 +423,16 @@ def plot_equity_curve(equity, df_test, bets):
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
     plt.title(f"Backtest Equity Curve vs {trade_pair} Price")
+    # ====== 在图下方添加参数信息 ======
+    param_text = (
+        f"ADVANCED_FEATURES: {ADVANCED_FEATURES},  "
+        f"RISE_THRESHOLD: {RISE_THRESHOLD},  "
+        f"FUTURE_K_NUM: {FUTURE_K_NUM},  "
+        f"LOOKBACK_WINDOW: {LOOKBACK_WINDOW},  "
+        f"TAKE_PROFIT: {TAKE_PROFIT},  "
+        f"STOP_LOSS: {STOP_LOSS}"
+    )
+    plt.figtext(0.5, 0.01, param_text, ha='center', va='bottom', fontsize=10, color='gray', wrap=True)
     plt.tight_layout()
     plt.savefig("equity_curve.png", dpi=200)
     plt.close()
