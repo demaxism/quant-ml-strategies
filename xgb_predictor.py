@@ -328,7 +328,7 @@ def plot_bet_results(df, y_prob, bets, n_hist=4):
 
 def plot_equity_curve(equity, df_test, bets):
     """
-    绘制资金曲线（右轴，归一化），叠加价格曲线（左轴，原始），横轴为日期
+    绘制资金曲线（右轴，原始数值），叠加价格曲线（左轴，原始），横轴为日期
     """
     import numpy as np
     fig, ax1 = plt.subplots(figsize=(12,6))
@@ -337,23 +337,19 @@ def plot_equity_curve(equity, df_test, bets):
     ax1.set_xlabel("Date")
     ax1.set_ylabel("Price", color='orange')
     ax1.tick_params(axis='y', labelcolor='orange')
-    # 资金曲线（右轴，归一化）
+    # 资金曲线（右轴，原始数值）
     ax2 = ax1.twinx()
     trade_idx = np.where(bets)[0]
     trade_dates = df_test['date'].iloc[trade_idx]
     equity_arr = np.array(equity[1:])
-    if len(equity_arr) > 1:
-        norm_equity = (equity_arr - equity_arr.min()) / (equity_arr.max() - equity_arr.min() + 1e-8)
-    else:
-        norm_equity = equity_arr
-    ax2.plot(trade_dates, norm_equity, label="Equity Curve (Normalized)", color='b')
-    ax2.set_ylabel("Normalized Equity", color='b')
+    ax2.plot(trade_dates, equity_arr, label="Equity Curve", color='b')
+    ax2.set_ylabel("Equity", color='b')
     ax2.tick_params(axis='y', labelcolor='b')
     # 图例
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
-    plt.title("Backtest Equity Curve (Normalized) vs Price")
+    plt.title("Backtest Equity Curve vs Price")
     plt.tight_layout()
     plt.savefig("equity_curve.png", dpi=200)
     plt.close()
