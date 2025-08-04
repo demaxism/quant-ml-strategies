@@ -53,8 +53,8 @@ RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%�
 FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
 TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
 STOP_LOSS = -0.003             # 止损百分比（如-0.01表示-1%止损）
-DATA_FILE = "data/ETH_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
-FINE_DATA_FILE = "data/ETH_USDT-1h.feather"
+DATA_FILE = "data/LTC_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
+FINE_DATA_FILE = "data/LTC_USDT-1h.feather"
 
 
 def load_data(file_path):
@@ -245,6 +245,9 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
         close_price = None
         close_date = ''
         pnl = 0
+        # 计算预期止盈止损点
+        tp_price = open_price * (1 + take_profit)
+        sl_price = open_price * (1 + stop_loss)
         # 止盈止损逻辑
         hit = False
         exit_idx = None
@@ -263,6 +266,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 hit = True
                 exit_idx = idx + k
                 print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(平均法成交)")
+                print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
                 break
             # 止盈
             if high >= tp_price:
@@ -273,6 +277,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 profit_count += 1
                 exit_idx = idx + k
                 print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止盈)")
+                print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
                 break
             # 止损
             if low <= sl_price:
@@ -282,6 +287,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 hit = True
                 exit_idx = idx + k
                 print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止损)")
+                print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
                 break
         if not hit:
             # 未触发止盈止损，按最后一根K线close价平仓
@@ -296,6 +302,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 pnl = 0
                 exit_idx = idx
             print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(未触发止盈止损)")
+            print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
         # 统一打印详细K线信息
         if exit_idx is not None and exit_idx < len(df_test):
             for i in range(idx, exit_idx + 1):
