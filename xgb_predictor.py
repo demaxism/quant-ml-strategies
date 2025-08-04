@@ -262,12 +262,14 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 close_price = tp_price
                 pnl = take_profit
                 hit = True
+                print(f"{idx}\t{date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止盈)")
                 break
             # 止损
             if low <= sl_price:
                 close_price = sl_price
                 pnl = stop_loss
                 hit = True
+                print(f"{idx}\t{date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止损)")
                 break
         if not hit:
             # 未触发止盈止损，按最后一根K线close价平仓
@@ -277,10 +279,9 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
             else:
                 close_price = open_price
                 pnl = 0
+            print(f"{idx}\t{date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(未触发止盈止损)")
         trade_pnl.append(pnl)
         equity.append(equity[-1] * (1 + pnl))
-        if df_test is not None:
-            print(f"{idx}\t{date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}")
     equity = np.array(equity)
     return y_prob, bets, equity, trade_pnl
 
