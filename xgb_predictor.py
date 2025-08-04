@@ -24,6 +24,37 @@ import shap
 import warnings
 import os
 
+_log_print_counter = 0
+_log_print_ellipsis_printed = False
+
+def log_print(obj):
+    """
+    仅前100次调用正常打印，之后只打印一次省略号“...”，其余调用不再打印。
+    """
+    global _log_print_counter, _log_print_ellipsis_printed
+    _log_print_counter += 1
+    if _log_print_counter <= 100:
+        if isinstance(obj, pd.DataFrame) or isinstance(obj, pd.Series):
+            lines = str(obj).splitlines()
+        elif isinstance(obj, (list, tuple)):
+            lines = [str(x) for x in obj]
+        else:
+            lines = str(obj).splitlines()
+        n = len(lines)
+        if n <= 20:
+            for line in lines:
+                print(line)
+        else:
+            for line in lines[:10]:
+                print(line)
+            print("...")
+            for line in lines[-10:]:
+                print(line)
+    elif not _log_print_ellipsis_printed:
+        print("...")
+        _log_print_ellipsis_printed = True
+    # else: do nothing
+
 warnings.filterwarnings("ignore")
 
 # ======= 输出信息说明 =======
@@ -267,8 +298,8 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 close_date = df_test.iloc[idx + k]['date']
                 hit = True
                 exit_idx = idx + k
-                print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(平均法成交)")
-                print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
+                log_print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(平均法成交)")
+                log_print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
                 break
             # 止盈
             if high >= tp_price:
@@ -278,8 +309,8 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 hit = True
                 profit_count += 1
                 exit_idx = idx + k
-                print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止盈)")
-                print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
+                log_print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止盈)")
+                log_print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
                 break
             # 止损
             if low <= sl_price:
@@ -288,8 +319,8 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 close_date = df_test.iloc[idx + k]['date']
                 hit = True
                 exit_idx = idx + k
-                print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止损)")
-                print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
+                log_print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止损)")
+                log_print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
                 break
         if not hit:
             # 未触发止盈止损，按最后一根K线close价平仓
@@ -303,23 +334,23 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 close_date = open_date
                 pnl = 0
                 exit_idx = idx
-            print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(未触发止盈止损)")
-            print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
+            log_print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(未触发止盈止损)")
+            log_print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}")
         # 统一打印详细K线信息
         if exit_idx is not None and exit_idx < len(df_test):
             for i in range(idx, exit_idx + 1):
                 row = df_test.iloc[i]
                 if i == idx:
-                    print(f"  进场K线: {row['date']} O:{row['open']} C:{row['close']} H:{row['high']} L:{row['low']} V:{row['volume']}")
+                    log_print(f"  进场K线: {row['date']} O:{row['open']} C:{row['close']} H:{row['high']} L:{row['low']} V:{row['volume']}")
                 elif i == exit_idx:
-                    print(f"  平仓K线: {row['date']} O:{row['open']} C:{row['close']} H:{row['high']} L:{row['low']} V:{row['volume']}")
+                    log_print(f"  平仓K线: {row['date']} O:{row['open']} C:{row['close']} H:{row['high']} L:{row['low']} V:{row['volume']}")
                 else:
-                    print(f"  持仓K线: {row['date']} O:{row['open']} C:{row['close']} H:{row['high']} L:{row['low']} V:{row['volume']}")
+                    log_print(f"  持仓K线: {row['date']} O:{row['open']} C:{row['close']} H:{row['high']} L:{row['low']} V:{row['volume']}")
         trade_pnl.append(pnl)
         equity.append(equity[-1] * (1 + pnl))
     if total_bets > 0:
         profit_ratio = profit_count / total_bets
-        print(f"止盈交易占比: {profit_count}/{total_bets} = {profit_ratio:.2%}")
+        log_print(f"止盈交易占比: {profit_count}/{total_bets} = {profit_ratio:.2%}")
     equity = np.array(equity)
     return y_prob, bets, equity, trade_pnl
 
