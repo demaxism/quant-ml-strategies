@@ -61,24 +61,6 @@ warnings.filterwarnings("ignore")
 # ======= 输出信息说明 =======
 # prob是模型对“未来涨1%”的概率预测，label是实际是否涨了1%(RISE_THRESHOLD)（回测时已知）
 
-# 1. __准确率（Accuracy）__\
-#    \= (预测对的样本数) / (总样本数)\
-#    反映整体预测的正确性。无论预测为1还是0，只要和实际一致都算对。
-
-# 2. __精确率（Precision）__\
-#    \= (真正例 TP) / (预测为正的样本数 TP + FP)\
-#    即所有被模型预测为“上涨”（下注）的样本中，实际真的上涨的比例。\
-#    —— 关注“下注时命中率”，即下注的质量。
-
-# 3. __召回率（Recall）__\
-#    \= (真正例 TP) / (实际为正的样本数 TP + FN)\
-#    即所有实际“上涨”的样本中，被模型成功预测出来的比例。\
-#    —— 关注“机会捕捉率”，即有多少上涨机会被抓住。
-
-# 4. __命中率（Hit Rate，回测中的命中率）__\
-#    \= (下注且实际上涨的次数) / (下注次数)\
-#    在本脚本的回测环节，命中率的定义和精确率是一样的：
-
 # ====== 用户可调参数 ======
 ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
 BET_PROB_THRESHOLD = 0.75   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
@@ -86,8 +68,9 @@ RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%�
 FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
 TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
 STOP_LOSS = -0.003             # 止损百分比（如-0.01表示-1%止损）
-DATA_FILE = "data/LTC_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
-FINE_DATA_FILE = "data/LTC_USDT-1h.feather"
+CRYPOTO_CURRENCY = "ETH"  # 可选：指定加密货币（如 "BTC", "ETH", "XRP" 等）
+DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
+FINE_DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-1h.feather"
 trade_pair = DATA_FILE.split('/')[-1].split('-')[0]  # 提取交易对名称，如 "LTC_USDT"
 
 
