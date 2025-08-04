@@ -65,7 +65,7 @@ warnings.filterwarnings("ignore")
 ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
 BET_PROB_THRESHOLD = 0.8   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
 RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
-FALL_THRESHOLD = -0.9       # 目标变量下跌幅度阈值（如-0.01表示-1%） 越大越好
+FALL_THRESHOLD = -1       # 目标变量下跌幅度阈值（如-0.01表示-1%） 越大越好
 FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
 LOOKBACK_WINDOW = 4         # 用于特征提取的历史K线数量（如4表示用过去4根K线的特征，可调为3、5等）
 TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
@@ -494,17 +494,19 @@ def main():
     # 用滑动窗口方式对细粒度数据提取特征，并用训练好的模型做推理和回测
     print(f"细粒度数据回测区间: {test_start} ~ {test_end}")
 
+    # 自动放大 future_k，使预测窗口与原粒度等效
+    fine_future_k = FUTURE_K_NUM * granularity_multiplier
     # 提取细粒度特征和标签
     X_fine, y_fine, feature_names_fine = add_features(
         df_fine, lookback_window=LOOKBACK_WINDOW, bonus=True, advanced=ADVANCED_FEATURES,
-        rise_threshold=RISE_THRESHOLD, future_k=FUTURE_K_NUM
+        rise_threshold=RISE_THRESHOLD, future_k=fine_future_k
     )
     # 对齐细粒度特征的日期
-    date_feat_fine = df_fine['date'].iloc[LOOKBACK_WINDOW:len(df_fine)-FUTURE_K_NUM].reset_index(drop=True)
+    date_feat_fine = df_fine['date'].iloc[LOOKBACK_WINDOW:len(df_fine)-fine_future_k].reset_index(drop=True)
     test_mask_fine = (date_feat_fine >= test_start) & (date_feat_fine <= test_end)
     X_fine_test = X_fine[test_mask_fine]
     y_fine_test = y_fine[test_mask_fine]
-    df_fine_test = df_fine.iloc[LOOKBACK_WINDOW:len(df_fine)-FUTURE_K_NUM].reset_index(drop=True)
+    df_fine_test = df_fine.iloc[LOOKBACK_WINDOW:len(df_fine)-fine_future_k].reset_index(drop=True)
     df_fine_test = df_fine_test[test_mask_fine].reset_index(drop=True)
 
     print(f"细粒度回测样本数: {len(y_fine_test)}")
