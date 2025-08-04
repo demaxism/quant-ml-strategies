@@ -247,6 +247,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
         pnl = 0
         # 止盈止损逻辑
         hit = False
+        exit_idx = None
         for k in range(1, future_k+1):
             if idx + k >= len(df_test):
                 break
@@ -260,6 +261,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 close_price = open_price * (1 + pnl)
                 close_date = df_test.iloc[idx + k]['date']
                 hit = True
+                exit_idx = idx + k
                 print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(平均法成交)")
                 break
             # 止盈
@@ -269,6 +271,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 close_date = df_test.iloc[idx + k]['date']
                 hit = True
                 profit_count += 1
+                exit_idx = idx + k
                 print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止盈)")
                 break
             # 止损
@@ -277,6 +280,7 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 pnl = stop_loss
                 close_date = df_test.iloc[idx + k]['date']
                 hit = True
+                exit_idx = idx + k
                 print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(止损)")
                 break
         if not hit:
@@ -285,11 +289,23 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
                 close_price = df_test.iloc[idx + future_k]['close']
                 close_date = df_test.iloc[idx + future_k]['date']
                 pnl = (close_price - open_price) / open_price
+                exit_idx = idx + future_k
             else:
                 close_price = open_price
                 close_date = open_date
                 pnl = 0
+                exit_idx = idx
             print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t(未触发止盈止损)")
+        # 统一打印详细K线信息
+        if exit_idx is not None and exit_idx < len(df_test):
+            for i in range(idx, exit_idx + 1):
+                row = df_test.iloc[i]
+                if i == idx:
+                    print(f"  进场K线: {row['date']} O:{row['open']} C:{row['close']} H:{row['high']} L:{row['low']} V:{row['volume']}")
+                elif i == exit_idx:
+                    print(f"  平仓K线: {row['date']} O:{row['open']} C:{row['close']} H:{row['high']} L:{row['low']} V:{row['volume']}")
+                else:
+                    print(f"  持仓K线: {row['date']} O:{row['open']} C:{row['close']} H:{row['high']} L:{row['low']} V:{row['volume']}")
         trade_pnl.append(pnl)
         equity.append(equity[-1] * (1 + pnl))
     if total_bets > 0:
