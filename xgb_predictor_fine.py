@@ -515,7 +515,7 @@ def main():
     else:
         y_prob_fine, bets_fine, equity_fine, trade_pnl_fine = backtest(
             model, X_fine_test, y_fine_test, df_test=df_fine_test,
-            prob_thres=BET_PROB_THRESHOLD, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS, future_k=FUTURE_K_NUM
+            prob_thres=BET_PROB_THRESHOLD, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS, future_k=fine_future_k
         )
         # 可选：细粒度下注可视化
         try:
