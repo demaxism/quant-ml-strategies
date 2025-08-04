@@ -63,12 +63,12 @@ warnings.filterwarnings("ignore")
 
 # ====== 用户可调参数 ======
 ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False: 只用基础特征
-BET_PROB_THRESHOLD = 0.75   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
+BET_PROB_THRESHOLD = 0.8   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
 RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
 FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
 TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
 STOP_LOSS = -0.01             # 止损百分比（如-0.01表示-1%止损）
-CRYPOTO_CURRENCY = "ETH"  # 可选：指定加密货币（如 "BTC", "ETH", "XRP" 等）
+CRYPOTO_CURRENCY = "LTC"  # 可选：指定加密货币（如 "BTC", "ETH", "XRP" 等）
 DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
 FINE_DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-1h.feather"
 trade_pair = DATA_FILE.split('/')[-1].split('-')[0]  # 提取交易对名称，如 "LTC_USDT"
@@ -149,7 +149,7 @@ def add_features(df, n_hist=4, bonus=False, advanced=True, rise_threshold=RISE_T
 
     feats = []
     col_names = []
-    for i in range(n_hist, len(df)-4):
+    for i in range(n_hist, len(df)-future_k):
         feat = []
         for j in range(n_hist):
             k_idx = i - n_hist + j
