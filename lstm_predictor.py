@@ -69,6 +69,14 @@ def main():
     X_train, y_train = X[:split], y[:split]
     X_test, y_test = X[split:], y[split:]
 
+    # Print time ranges for training and test (backtest) sets
+    train_start = df.index[SEQ_LEN]
+    train_end = df.index[SEQ_LEN + split - 1]
+    test_start = df.index[SEQ_LEN + split + 1]
+    test_end = df.index[SEQ_LEN + split + len(X_test)]
+    print(f"Training set time range: {train_start} to {train_end}")
+    print(f"Backtest (test) set time range: {test_start} to {test_end}")
+
     # Dataset
     class PriceDataset(Dataset):
         def __init__(self, X, y):
@@ -143,7 +151,7 @@ def main():
     plt.xticks(rotation=45)
     plt.grid(True)
     plt.tight_layout()
-    plt.show()
+    plt.savefig(f"lstm_predictions_{symbol}_{timeframe}.png")
 
     # === Long-only Trading Strategy Backtest ===
     def backtest_long_only_strategy(true, predicted, date_index, threshold=0.008, allowance=0.002):
