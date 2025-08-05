@@ -16,6 +16,9 @@ from torch.utils.data import Dataset, DataLoader
 import argparse
 import re
 import os
+from datetime import datetime
+
+timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 def parse_symbol_timeframe(filepath):
     # Try to extract SYMBOL-TIMEFRAME from filename, e.g. ETH_USDT-4h
@@ -33,10 +36,16 @@ def main():
                         help='Path to input feather file (e.g., data/ETH_USDT-4h.feather)')
     parser.add_argument('--seq_len', type=int, default=48,
                         help='Number of past candles to use for prediction')
+    parser.add_argument('--model_file', type=str, default='lstm_model.pth',
+                        help='Path to save/load the LSTM model weights')
+    parser.add_argument('--no_train', action='store_true',
+                        help='If set, load model from file and skip training')
     args = parser.parse_args()
 
     datafile = args.datafile
     SEQ_LEN = args.seq_len
+    model_file = args.model_file
+    no_train = args.no_train
 
     if not os.path.exists(datafile):
         raise FileNotFoundError(f"Data file not found: {datafile}")
@@ -101,17 +110,26 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     loss_fn = nn.MSELoss()
 
-    # Train
-    for epoch in range(10):
-        total_loss = 0
-        for batch_x, batch_y in train_loader:
-            pred = model(batch_x)
-            loss = loss_fn(pred, batch_y)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
-        print(f"Epoch {epoch+1} Loss: {total_loss / len(train_loader):.4f}")
+    if no_train:
+        if not os.path.exists(model_file):
+            raise FileNotFoundError(f"Model file not found: {model_file}")
+        model.load_state_dict(torch.load(model_file, map_location=torch.device('cpu')))
+        print(f"Loaded model weights from {model_file}. Skipping training.")
+    else:
+        # Train
+        for epoch in range(10):
+            total_loss = 0
+            for batch_x, batch_y in train_loader:
+                pred = model(batch_x)
+                loss = loss_fn(pred, batch_y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
+            print(f"Epoch {epoch+1} Loss: {total_loss / len(train_loader):.4f}")
+        model_file = f"model_{timestamp}.pt"
+        torch.save(model.state_dict(), model_file)
+        print(f"Saved trained model weights to {model_file}.")
 
     # Predict
     model.eval()
