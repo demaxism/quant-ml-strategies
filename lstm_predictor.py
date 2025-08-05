@@ -4,6 +4,7 @@
 # strategy backtest based on the predicted high and low prices.
 # The script can be run from the command line with options for the data file and sequence length
 # sample: python lstm_predictor.py --datafile data/ETH_USDT-4h.feather --seq_len 48
+# Load model sameple: python lstm_predictor.py --datafile data/ETH_USDT-4h.feather --model_file 'lstm_model.pth' --no_train
 
 
 import pandas as pd
@@ -304,7 +305,7 @@ def main():
         ax2 = ax1.twinx()
 
         # Plot equity curve (right Y-axis)
-        l1, = ax1.plot(dates, equity[:-1], label='Equity Curve', color='blue')
+        l1, = ax1.plot(dates, equity[:len(dates)], label='Equity Curve', color='blue')
         ax1.set_ylabel('Equity ($)', color='blue')
         ax1.tick_params(axis='y', labelcolor='blue')
 
