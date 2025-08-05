@@ -128,7 +128,7 @@ def main():
                 optimizer.step()
                 total_loss += loss.item()
             print(f"Epoch {epoch+1} Loss: {total_loss / len(train_loader):.4f}")
-        model_file = f"model_{timestamp}.pt"
+        model_file = f"data/model_{timestamp}.pt"
         torch.save(model.state_dict(), model_file)
         print(f"Saved trained model weights to {model_file}.")
 
@@ -170,7 +170,7 @@ def main():
     plt.xticks(rotation=45)
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(f"lstm_predictions_{symbol}_{timeframe}.png")
+    plt.savefig(f"data/lstm_predictions_{symbol}_{timeframe}.png")
 
     # === Long-only Trading Strategy Backtest ===
     def backtest_long_only_strategy(true, predicted, date_index, threshold=0.008, allowance=0.002):
@@ -189,12 +189,22 @@ def main():
         - Only one exit per trade (whichever is triggered first)
         - Only one entry per bar, and no immediate re-entry after exit
         - Equity is only updated when a trade is closed or at the end of the bar if flat
+
+        Additionally, logs every bar with trade state to a CSV.
         """
+        import csv
+
         # For entry/exit, we need the true close and high prices for the test set
         close_prices = df['close'].values[SEQ_LEN + split + 1:]
         close_prices = close_prices[:len(predicted)]
         high_prices = df['high'].values[SEQ_LEN + split + 1:]
         high_prices = high_prices[:len(predicted)]
+        low_prices = df['low'].values[SEQ_LEN + split + 1:]
+        low_prices = low_prices[:len(predicted)]
+        open_prices = df['open'].values[SEQ_LEN + split + 1:]
+        open_prices = open_prices[:len(predicted)]
+        volumes = df['volume'].values[SEQ_LEN + split + 1:]
+        volumes = volumes[:len(predicted)]
         dates = date_index[:len(predicted)]
 
         equity = [1.0]  # start with $1
@@ -203,32 +213,69 @@ def main():
         entry_date = None
         trade_log = []
         last_equity = equity[-1]
+
+        detailed_log = []
+
+        # Helper for trade log
+        def log_trade(entry_date, entry_price, exit_date, exit_price, pnl, exit_type):
+            trade_log.append({
+                'entry_date': entry_date,
+                'entry_price': entry_price,
+                'exit_date': exit_date,
+                'exit_price': exit_price,
+                'pnl': pnl,
+                'exit_type': exit_type
+            })
+
+        # Helper for detailed log
+        def log_detailed(dt, o, h, l, c, v, state, entry_price, take_profit, stop_loss, exit_method, pnl):
+            detailed_log.append({
+                'datetime': dt,
+                'open': o,
+                'high': h,
+                'low': l,
+                'close': c,
+                'volume': v,
+                'state': state,
+                'entry_price': entry_price,
+                'take_profit': take_profit,
+                'stop_loss': stop_loss,
+                'exit_method': exit_method,
+                'pnl': pnl
+            })
+
         for i in range(len(predicted) - 1):  # last prediction can't be traded (no next close)
             curr_close = close_prices[i]
+            curr_open = open_prices[i]
+            curr_high = high_prices[i]
+            curr_low = low_prices[i]
+            curr_volume = volumes[i]
+            curr_date = dates[i]
             next_close = close_prices[i+1]
             next_high = high_prices[i+1]
-            next_low = df['low'].values[SEQ_LEN + split + 1 + i + 1]
+            next_low = low_prices[i+1]
             pred_high = predicted[i, 0]
             pred_low = predicted[i, 1]
             exited_this_bar = False
 
+            # Default state
+            state = "flat"
+            exit_method = ""
+            take_profit_price = pred_high * (1 - allowance)
+            stop_loss_price = pred_low * (1 + allowance)
+
             # Exit logic: only if in position
             if position == 1:
-                stop_loss_price = pred_low * (1 + allowance)
-                take_profit_price = pred_high * (1 - allowance)
                 # 1. Stop loss
                 if next_low <= stop_loss_price:
                     pnl = (stop_loss_price - entry_price) / entry_price
                     last_equity = last_equity * (1 + pnl)
                     equity.append(last_equity)
-                    trade_log.append({
-                        'entry_date': entry_date,
-                        'entry_price': entry_price,
-                        'exit_date': dates[i+1],
-                        'exit_price': stop_loss_price,
-                        'pnl': pnl,
-                        'exit_type': 'stop_loss'
-                    })
+                    log_trade(entry_date, entry_price, dates[i+1], stop_loss_price, pnl, "stop_loss")
+                    log_detailed(
+                        dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
+                        "exit", entry_price, take_profit_price, stop_loss_price, "stop_loss", pnl
+                    )
                     position = 0
                     exited_this_bar = True
                 # 2. Take profit (only if stop loss not triggered)
@@ -236,14 +283,11 @@ def main():
                     pnl = (take_profit_price - entry_price) / entry_price
                     last_equity = last_equity * (1 + pnl)
                     equity.append(last_equity)
-                    trade_log.append({
-                        'entry_date': entry_date,
-                        'entry_price': entry_price,
-                        'exit_date': dates[i+1],
-                        'exit_price': take_profit_price,
-                        'pnl': pnl,
-                        'exit_type': 'take_profit'
-                    })
+                    log_trade(entry_date, entry_price, dates[i+1], take_profit_price, pnl, "take_profit")
+                    log_detailed(
+                        dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
+                        "exit", entry_price, take_profit_price, stop_loss_price, "take_profit", pnl
+                    )
                     position = 0
                     exited_this_bar = True
                 # 3. Exit at next close (only if neither triggered)
@@ -251,14 +295,11 @@ def main():
                     pnl = (next_close - entry_price) / entry_price
                     last_equity = last_equity * (1 + pnl)
                     equity.append(last_equity)
-                    trade_log.append({
-                        'entry_date': entry_date,
-                        'entry_price': entry_price,
-                        'exit_date': dates[i+1],
-                        'exit_price': next_close,
-                        'pnl': pnl,
-                        'exit_type': 'close'
-                    })
+                    log_trade(entry_date, entry_price, dates[i+1], next_close, pnl, "close")
+                    log_detailed(
+                        dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
+                        "exit", entry_price, take_profit_price, stop_loss_price, "close", pnl
+                    )
                     position = 0
                     exited_this_bar = True
 
@@ -266,7 +307,17 @@ def main():
             if position == 0 and not exited_this_bar and pred_high > curr_close * (1 + threshold):
                 position = 1
                 entry_price = curr_close
-                entry_date = dates[i]
+                entry_date = curr_date
+                log_detailed(
+                    curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
+                    "entry", entry_price, take_profit_price, stop_loss_price, "", 0
+                )
+            elif position == 1 and not exited_this_bar:
+                # Log holding bar
+                log_detailed(
+                    curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
+                    "holding", entry_price, take_profit_price, stop_loss_price, "", 0
+                )
 
             # If not in position, keep equity flat (append last_equity)
             if position == 0:
@@ -277,16 +328,26 @@ def main():
             pnl = (close_prices[-1] - entry_price) / entry_price
             last_equity = last_equity * (1 + pnl)
             equity.append(last_equity)
-            trade_log.append({
-                'entry_date': entry_date,
-                'entry_price': entry_price,
-                'exit_date': dates[-1],
-                'exit_price': close_prices[-1],
-                'pnl': pnl,
-                'exit_type': 'final_close'
-            })
+            log_trade(entry_date, entry_price, dates[-1], close_prices[-1], pnl, "final_close")
+            log_detailed(
+                dates[-1], open_prices[-1], high_prices[-1], low_prices[-1], close_prices[-1], volumes[-1],
+                "exit", entry_price, take_profit_price, stop_loss_price, "final_close", pnl
+            )
         else:
             equity.append(last_equity)
+
+        # Write detailed log to CSV
+        log_filename = f"data/lstm_backtest_log_{timestamp}.csv"
+        log_columns = [
+            'datetime', 'open', 'high', 'low', 'close', 'volume',
+            'state', 'entry_price', 'take_profit', 'stop_loss', 'exit_method', 'pnl'
+        ]
+        with open(log_filename, 'w', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=log_columns)
+            writer.writeheader()
+            for row in detailed_log:
+                writer.writerow(row)
+        print(f"Detailed backtest log written to {log_filename}")
 
         # Compute stats
         returns = np.array([t['pnl'] for t in trade_log])
