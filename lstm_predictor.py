@@ -228,7 +228,7 @@ def main():
             })
 
         # Helper for detailed log
-        def log_detailed(dt, o, h, l, c, v, state, entry_price, take_profit, stop_loss, exit_method, pnl):
+        def log_detailed(dt, o, h, l, c, v, state, entry_price, take_profit, stop_loss, exit_method, pnl, abs_pnl):
             detailed_log.append({
                 'datetime': dt,
                 'open': o,
@@ -241,7 +241,8 @@ def main():
                 'take_profit': take_profit,
                 'stop_loss': stop_loss,
                 'exit_method': exit_method,
-                'pnl': pnl
+                'pnl': pnl,
+                'abs_pnl': abs_pnl
             })
 
         for i in range(len(predicted) - 1):  # last prediction can't be traded (no next close)
@@ -274,7 +275,7 @@ def main():
                     log_trade(entry_date, entry_price, dates[i+1], stop_loss_price, pnl, "stop_loss")
                     log_detailed(
                         dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
-                        "exit", entry_price, take_profit_price, stop_loss_price, "stop_loss", pnl
+                        "exit", entry_price, take_profit_price, stop_loss_price, "stop_loss", pnl, last_equity - (last_equity / (1 + pnl))
                     )
                     position = 0
                     exited_this_bar = True
@@ -286,7 +287,7 @@ def main():
                     log_trade(entry_date, entry_price, dates[i+1], take_profit_price, pnl, "take_profit")
                     log_detailed(
                         dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
-                        "exit", entry_price, take_profit_price, stop_loss_price, "take_profit", pnl
+                        "exit", entry_price, take_profit_price, stop_loss_price, "take_profit", pnl, last_equity - (last_equity / (1 + pnl))
                     )
                     position = 0
                     exited_this_bar = True
@@ -298,7 +299,7 @@ def main():
                     log_trade(entry_date, entry_price, dates[i+1], next_close, pnl, "close")
                     log_detailed(
                         dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
-                        "exit", entry_price, take_profit_price, stop_loss_price, "close", pnl
+                        "exit", entry_price, take_profit_price, stop_loss_price, "close", pnl, last_equity - (last_equity / (1 + pnl))
                     )
                     position = 0
                     exited_this_bar = True
@@ -310,13 +311,13 @@ def main():
                 entry_date = curr_date
                 log_detailed(
                     curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                    "entry", entry_price, take_profit_price, stop_loss_price, "", 0
+                    "entry", entry_price, take_profit_price, stop_loss_price, "", 0, 0
                 )
             elif position == 1 and not exited_this_bar:
                 # Log holding bar
                 log_detailed(
                     curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                    "holding", entry_price, take_profit_price, stop_loss_price, "", 0
+                    "holding", entry_price, take_profit_price, stop_loss_price, "", 0, 0
                 )
 
             # If not in position, keep equity flat (append last_equity)
@@ -331,7 +332,7 @@ def main():
             log_trade(entry_date, entry_price, dates[-1], close_prices[-1], pnl, "final_close")
             log_detailed(
                 dates[-1], open_prices[-1], high_prices[-1], low_prices[-1], close_prices[-1], volumes[-1],
-                "exit", entry_price, take_profit_price, stop_loss_price, "final_close", pnl
+                "exit", entry_price, take_profit_price, stop_loss_price, "final_close", pnl, last_equity - (last_equity / (1 + pnl))
             )
         else:
             equity.append(last_equity)
@@ -340,7 +341,7 @@ def main():
         log_filename = f"data/lstm_backtest_log_{timestamp}.csv"
         log_columns = [
             'datetime', 'open', 'high', 'low', 'close', 'volume',
-            'state', 'entry_price', 'take_profit', 'stop_loss', 'exit_method', 'pnl'
+            'state', 'entry_price', 'take_profit', 'stop_loss', 'exit_method', 'pnl', 'abs_pnl'
         ]
         with open(log_filename, 'w', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=log_columns)
