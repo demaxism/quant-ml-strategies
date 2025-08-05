@@ -1,3 +1,11 @@
+# explain: This script implements a generic LSTM-based price predictor for financial time series data.
+# It loads data from a feather file, normalizes it, creates sequences for LSTM input,
+# trains an LSTM model, and evaluates its predictions. It also includes a long-only trading
+# strategy backtest based on the predicted high and low prices.
+# The script can be run from the command line with options for the data file and sequence length
+# sample: python lstm_predictor.py --datafile data/ETH_USDT-4h.feather --seq_len 48
+
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -138,58 +146,120 @@ def main():
     plt.show()
 
     # === Long-only Trading Strategy Backtest ===
-    def backtest_long_only_strategy(true, predicted, date_index, threshold=0.002):
+    def backtest_long_only_strategy(true, predicted, date_index, threshold=0.008, allowance=0.002):
         """
         true: [N, 2] array of true [high, low] (not used here), but we use close prices from df
         predicted: [N, 2] array of predicted [high, low]
         date_index: DatetimeIndex for test set
         threshold: float, e.g. 0.002 for 0.2%
+        allowance: float, take profit/stop loss trigger as a fraction (default 0.002 = 0.2%)
+        
+        Exit logic:
+        - If in position, check in order:
+            1. Stop loss: if next bar's low <= pred_low * (1 + allowance), exit at pred_low * (1 + allowance)
+            2. Take profit: if next bar's high >= pred_high * (1 - allowance), exit at pred_high * (1 - allowance)
+            3. Otherwise, exit at next bar's close
+        - Only one exit per trade (whichever is triggered first)
+        - Only one entry per bar, and no immediate re-entry after exit
+        - Equity is only updated when a trade is closed or at the end of the bar if flat
         """
-        # For entry/exit, we need the true close prices for the test set
+        # For entry/exit, we need the true close and high prices for the test set
         close_prices = df['close'].values[SEQ_LEN + split + 1:]
         close_prices = close_prices[:len(predicted)]
+        high_prices = df['high'].values[SEQ_LEN + split + 1:]
+        high_prices = high_prices[:len(predicted)]
         dates = date_index[:len(predicted)]
 
         equity = [1.0]  # start with $1
         position = 0    # 0 = flat, 1 = long
         entry_price = 0
+        entry_date = None
         trade_log = []
+        last_equity = equity[-1]
         for i in range(len(predicted) - 1):  # last prediction can't be traded (no next close)
             curr_close = close_prices[i]
             next_close = close_prices[i+1]
+            next_high = high_prices[i+1]
+            next_low = df['low'].values[SEQ_LEN + split + 1 + i + 1]
             pred_high = predicted[i, 0]
-            # Entry condition: predicted high > curr_close * (1 + threshold)
-            if position == 0 and pred_high > curr_close * (1 + threshold):
+            pred_low = predicted[i, 1]
+            exited_this_bar = False
+
+            # Exit logic: only if in position
+            if position == 1:
+                stop_loss_price = pred_low * (1 + allowance)
+                take_profit_price = pred_high * (1 - allowance)
+                # 1. Stop loss
+                if next_low <= stop_loss_price:
+                    pnl = (stop_loss_price - entry_price) / entry_price
+                    last_equity = last_equity * (1 + pnl)
+                    equity.append(last_equity)
+                    trade_log.append({
+                        'entry_date': entry_date,
+                        'entry_price': entry_price,
+                        'exit_date': dates[i+1],
+                        'exit_price': stop_loss_price,
+                        'pnl': pnl,
+                        'exit_type': 'stop_loss'
+                    })
+                    position = 0
+                    exited_this_bar = True
+                # 2. Take profit (only if stop loss not triggered)
+                elif next_high >= take_profit_price:
+                    pnl = (take_profit_price - entry_price) / entry_price
+                    last_equity = last_equity * (1 + pnl)
+                    equity.append(last_equity)
+                    trade_log.append({
+                        'entry_date': entry_date,
+                        'entry_price': entry_price,
+                        'exit_date': dates[i+1],
+                        'exit_price': take_profit_price,
+                        'pnl': pnl,
+                        'exit_type': 'take_profit'
+                    })
+                    position = 0
+                    exited_this_bar = True
+                # 3. Exit at next close (only if neither triggered)
+                else:
+                    pnl = (next_close - entry_price) / entry_price
+                    last_equity = last_equity * (1 + pnl)
+                    equity.append(last_equity)
+                    trade_log.append({
+                        'entry_date': entry_date,
+                        'entry_price': entry_price,
+                        'exit_date': dates[i+1],
+                        'exit_price': next_close,
+                        'pnl': pnl,
+                        'exit_type': 'close'
+                    })
+                    position = 0
+                    exited_this_bar = True
+
+            # Entry logic: only if not in position and did not just exit
+            if position == 0 and not exited_this_bar and pred_high > curr_close * (1 + threshold):
                 position = 1
                 entry_price = curr_close
                 entry_date = dates[i]
-            # Exit condition: always exit at next bar's close if in position
-            if position == 1:
-                pnl = (next_close - entry_price) / entry_price
-                equity.append(equity[-1] * (1 + pnl))
-                trade_log.append({
-                    'entry_date': entry_date,
-                    'entry_price': entry_price,
-                    'exit_date': dates[i+1],
-                    'exit_price': next_close,
-                    'pnl': pnl
-                })
-                position = 0
-            else:
-                equity.append(equity[-1])
+
+            # If not in position, keep equity flat (append last_equity)
+            if position == 0:
+                equity.append(last_equity)
+
         # If still in position at the end, close at last close
         if position == 1:
             pnl = (close_prices[-1] - entry_price) / entry_price
-            equity.append(equity[-1] * (1 + pnl))
+            last_equity = last_equity * (1 + pnl)
+            equity.append(last_equity)
             trade_log.append({
                 'entry_date': entry_date,
                 'entry_price': entry_price,
                 'exit_date': dates[-1],
                 'exit_price': close_prices[-1],
-                'pnl': pnl
+                'pnl': pnl,
+                'exit_type': 'final_close'
             })
         else:
-            equity.append(equity[-1])
+            equity.append(last_equity)
 
         # Compute stats
         returns = np.array([t['pnl'] for t in trade_log])
