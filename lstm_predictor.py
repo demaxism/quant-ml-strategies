@@ -312,15 +312,23 @@ def main():
 
             # Entry logic: only if not in position and did not just exit
             if position == 0 and not exited_this_bar and pred_high > curr_close * (1 + threshold):
-                position = 1
-                entry_price = curr_close
-                entry_date = curr_date
-                entry_take_profit = take_profit_price
-                entry_stop_loss = stop_loss_price
-                log_detailed(
-                    curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                    "entry", entry_price, entry_take_profit, entry_stop_loss, "", 0, 0, ""
-                )
+                # Only enter if take profit is above entry and stop loss is below entry
+                if (take_profit_price > curr_close) and (stop_loss_price < curr_close):
+                    position = 1
+                    entry_price = curr_close
+                    entry_date = curr_date
+                    entry_take_profit = take_profit_price
+                    entry_stop_loss = stop_loss_price
+                    log_detailed(
+                        curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
+                        "entry", entry_price, entry_take_profit, entry_stop_loss, "", 0, 0, ""
+                    )
+                else:
+                    # Skip entry if invalid take profit/stop loss
+                    log_detailed(
+                        curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
+                        "skip_entry", curr_close, take_profit_price, stop_loss_price, "invalid_tp_sl", 0, 0, ""
+                    )
             elif position == 1 and not exited_this_bar:
                 # Log holding bar
                 log_detailed(
