@@ -280,14 +280,31 @@ def main():
         print(f"  Win Rate: {win_rate*100:.2f}%")
         print(f"  Max Drawdown: {max_drawdown*100:.2f}%")
 
-        # Plot equity curve
+        # Plot equity curve with price overlay (separate Y-axes)
         plt.figure(figsize=(12, 5))
-        plt.plot(dates, equity[:-1], label='Equity Curve')
-        plt.title('Equity Curve (Long-only Strategy)')
-        plt.xlabel('Date')
-        plt.ylabel('Equity ($)')
-        plt.grid(True)
-        plt.legend()
+        ax1 = plt.gca()
+        ax2 = ax1.twinx()
+
+        # Plot equity curve (right Y-axis)
+        l1, = ax1.plot(dates, equity[:-1], label='Equity Curve', color='blue')
+        ax1.set_ylabel('Equity ($)', color='blue')
+        ax1.tick_params(axis='y', labelcolor='blue')
+
+        # Plot price curve (left Y-axis, semi-transparent orange)
+        l2, = ax2.plot(dates, close_prices[:len(dates)], label='Price', color='orange', alpha=0.5)
+        ax2.set_ylabel('Price', color='orange')
+        ax2.tick_params(axis='y', labelcolor='orange')
+
+        # Title, grid, legend, etc.
+        plt.title('Equity Curve (Long-only Strategy) with Price Overlay')
+        ax1.set_xlabel('Date')
+        ax1.grid(True)
+
+        # Combine legends
+        lines = [l1, l2]
+        labels = [line.get_label() for line in lines]
+        ax1.legend(lines, labels, loc='upper left')
+
         plt.tight_layout()
         plt.show()
 
