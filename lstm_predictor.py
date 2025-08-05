@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import argparse
-import os
 import re
+import os
 
 def parse_symbol_timeframe(filepath):
     # Try to extract SYMBOL-TIMEFRAME from filename, e.g. ETH_USDT-4h
@@ -136,6 +136,88 @@ def main():
     plt.grid(True)
     plt.tight_layout()
     plt.show()
+
+    # === Long-only Trading Strategy Backtest ===
+    def backtest_long_only_strategy(true, predicted, date_index, threshold=0.002):
+        """
+        true: [N, 2] array of true [high, low] (not used here), but we use close prices from df
+        predicted: [N, 2] array of predicted [high, low]
+        date_index: DatetimeIndex for test set
+        threshold: float, e.g. 0.002 for 0.2%
+        """
+        # For entry/exit, we need the true close prices for the test set
+        close_prices = df['close'].values[SEQ_LEN + split + 1:]
+        close_prices = close_prices[:len(predicted)]
+        dates = date_index[:len(predicted)]
+
+        equity = [1.0]  # start with $1
+        position = 0    # 0 = flat, 1 = long
+        entry_price = 0
+        trade_log = []
+        for i in range(len(predicted) - 1):  # last prediction can't be traded (no next close)
+            curr_close = close_prices[i]
+            next_close = close_prices[i+1]
+            pred_high = predicted[i, 0]
+            # Entry condition: predicted high > curr_close * (1 + threshold)
+            if position == 0 and pred_high > curr_close * (1 + threshold):
+                position = 1
+                entry_price = curr_close
+                entry_date = dates[i]
+            # Exit condition: always exit at next bar's close if in position
+            if position == 1:
+                pnl = (next_close - entry_price) / entry_price
+                equity.append(equity[-1] * (1 + pnl))
+                trade_log.append({
+                    'entry_date': entry_date,
+                    'entry_price': entry_price,
+                    'exit_date': dates[i+1],
+                    'exit_price': next_close,
+                    'pnl': pnl
+                })
+                position = 0
+            else:
+                equity.append(equity[-1])
+        # If still in position at the end, close at last close
+        if position == 1:
+            pnl = (close_prices[-1] - entry_price) / entry_price
+            equity.append(equity[-1] * (1 + pnl))
+            trade_log.append({
+                'entry_date': entry_date,
+                'entry_price': entry_price,
+                'exit_date': dates[-1],
+                'exit_price': close_prices[-1],
+                'pnl': pnl
+            })
+        else:
+            equity.append(equity[-1])
+
+        # Compute stats
+        returns = np.array([t['pnl'] for t in trade_log])
+        total_return = equity[-1] - 1.0
+        win_rate = np.mean(returns > 0) if len(returns) > 0 else 0
+        max_drawdown = np.max(np.maximum.accumulate(equity[:-1]) - equity[:-1])
+        print(f"Backtest Results (Long-only, threshold={threshold*100:.2f}%):")
+        print(f"  Total Return: {total_return*100:.2f}%")
+        print(f"  Number of Trades: {len(trade_log)}")
+        print(f"  Win Rate: {win_rate*100:.2f}%")
+        print(f"  Max Drawdown: {max_drawdown*100:.2f}%")
+
+        # Plot equity curve
+        plt.figure(figsize=(12, 5))
+        plt.plot(dates, equity[:-1], label='Equity Curve')
+        plt.title('Equity Curve (Long-only Strategy)')
+        plt.xlabel('Date')
+        plt.ylabel('Equity ($)')
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+        return trade_log, equity
+
+    # Run backtest with default threshold, or allow override via env var
+    threshold = float(os.environ.get('LSTM_STRATEGY_THRESHOLD', 0.002))
+    backtest_long_only_strategy(true, predicted, date_index, threshold)
 
 if __name__ == "__main__":
     main()
