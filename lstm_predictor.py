@@ -183,7 +183,7 @@ def main():
         predicted = inverse_high_low(pred)
 
         # Step 1: Get full index of original data
-        date_index = df.index[SEQ_LEN + split + 1:]  # +1 for prediction shift
+        date_index = df.index[SEQ_LEN + split:]  # fixed: removed +1 to match X_test length
 
         # Step 2: Select the plotting range based on user input
         if plot_first is not None and plot_last is not None:
