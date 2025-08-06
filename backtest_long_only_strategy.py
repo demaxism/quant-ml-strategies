@@ -2,6 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
+# If True, all profit becomes loss and all loss becomes profit (simulate shorting)
+REVERT_PROFIT = False
+
 def backtest_long_only_strategy(
     true, predicted, date_index, df, split, SEQ_LEN, timestamp, WRITE_CSV=False, threshold=0.008, allowance=0.002
 ):
@@ -121,6 +124,7 @@ def backtest_long_only_strategy(
             # 1. Stop loss (use trailing current_stop_loss)
             if next_low <= current_stop_loss:
                 pnl = (current_stop_loss - entry_price) / entry_price
+                pnl = -pnl if REVERT_PROFIT else pnl
                 last_equity = last_equity * (1 + pnl)
                 equity.append(last_equity)
                 log_trade(entry_date, entry_price, dates[i+1], current_stop_loss, pnl, "stop_loss")
@@ -136,6 +140,7 @@ def backtest_long_only_strategy(
             # 2. Take profit (use current bar's recalculated take_profit_price)
             elif next_high >= take_profit_price:
                 pnl = (take_profit_price - entry_price) / entry_price
+                pnl = -pnl if REVERT_PROFIT else pnl
                 last_equity = last_equity * (1 + pnl)
                 equity.append(last_equity)
                 log_trade(entry_date, entry_price, dates[i+1], take_profit_price, pnl, "take_profit")
@@ -151,6 +156,7 @@ def backtest_long_only_strategy(
             # 3. Hold up to N_HOLD bars, then exit at next close
             elif bars_held >= N_HOLD:
                 pnl = (next_close - entry_price) / entry_price
+                pnl = -pnl if REVERT_PROFIT else pnl
                 last_equity = last_equity * (1 + pnl)
                 equity.append(last_equity)
                 log_trade(entry_date, entry_price, dates[i+1], next_close, pnl, "max_hold")
@@ -199,6 +205,7 @@ def backtest_long_only_strategy(
     # If still in position at the end, close at last close
     if position == 1:
         pnl = (close_prices[-1] - entry_price) / entry_price
+        pnl = -pnl if REVERT_PROFIT else pnl
         last_equity = last_equity * (1 + pnl)
         equity.append(last_equity)
         log_trade(entry_date, entry_price, dates[-1], close_prices[-1], pnl, "final_close")
