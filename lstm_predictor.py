@@ -41,10 +41,13 @@ def main():
                         help='Path to save/load the LSTM model weights')
     parser.add_argument('--no_train', action='store_true',
                         help='If set, load model from file and skip training')
+    parser.add_argument('--n_hold', type=int, default=1,
+                        help='Number of bars ahead to predict (N_HOLD-th bar after the sequence)')
     args = parser.parse_args()
 
     datafile = args.datafile
     SEQ_LEN = args.seq_len
+    N_HOLD = args.n_hold
     model_file = args.model_file
     no_train = args.no_train
 
@@ -68,10 +71,11 @@ def main():
     scaled = scaler.fit_transform(df)
 
     # Sequence
+    # For each i, X = sequence of SEQ_LEN, y = [high, low] of (SEQ_LEN + N_HOLD - 1)-th bar after i
     X, y = [], []
-    for i in range(len(scaled) - SEQ_LEN - 1):
+    for i in range(len(scaled) - SEQ_LEN - N_HOLD + 1):
         X.append(scaled[i:i+SEQ_LEN])
-        y.append(scaled[i+SEQ_LEN][1:3])  # predict [high, low]
+        y.append(scaled[i+SEQ_LEN+N_HOLD-1][1:3])  # predict [high, low] of N_HOLD-th bar after the sequence
     X, y = np.array(X), np.array(y)
 
     # Train/test split
@@ -83,7 +87,7 @@ def main():
     train_start = df.index[SEQ_LEN]
     train_end = df.index[SEQ_LEN + split - 1]
     test_start = df.index[SEQ_LEN + split + 1]
-    test_end = df.index[SEQ_LEN + split + len(X_test)]
+    test_end = df.index[SEQ_LEN + split + len(X_test) - 1]
     print(f"Training set time range: {train_start} to {train_end}")
     print(f"Backtest (test) set time range: {test_start} to {test_end}")
 
@@ -117,7 +121,12 @@ def main():
         model.load_state_dict(torch.load(model_file, map_location=torch.device('cpu')))
         print(f"Loaded model weights from {model_file}. Skipping training.")
     else:
-        # Train
+        # Train with early stopping
+        best_loss = float('inf')
+        patience = 2  # Number of epochs to wait for improvement
+        patience_counter = 0
+        min_delta = 1e-4  # Minimum improvement to reset patience
+
         for epoch in range(10):
             total_loss = 0
             for batch_x, batch_y in train_loader:
@@ -127,7 +136,19 @@ def main():
                 loss.backward()
                 optimizer.step()
                 total_loss += loss.item()
-            print(f"Epoch {epoch+1} Loss: {total_loss / len(train_loader):.4f}")
+            avg_loss = total_loss / len(train_loader)
+            print(f"Epoch {epoch+1} Loss: {avg_loss:.4f}")
+
+            # Early stopping logic
+            if best_loss - avg_loss > min_delta:
+                best_loss = avg_loss
+                patience_counter = 0
+            else:
+                patience_counter += 1
+                if patience_counter >= patience:
+                    print(f"Early stopping at epoch {epoch+1} (no significant improvement for {patience} epochs).")
+                    break
+
         model_file = f"data/model_{timestamp}.pt"
         torch.save(model.state_dict(), model_file)
         print(f"Saved trained model weights to {model_file}.")
@@ -213,6 +234,8 @@ def main():
         entry_date = None
         entry_take_profit = None
         entry_stop_loss = None
+        bars_held = 0  # Number of bars position has been held
+        N_HOLD = 5     # Max bars to hold if no TP/SL (can be parameterized)
         trade_log = []
         last_equity = equity[-1]
 
@@ -248,7 +271,17 @@ def main():
                 'pnl_detail': pnl_detail
             })
 
-        for i in range(len(predicted) - 1):  # last prediction can't be traded (no next close)
+        # Ensure all arrays are the same length to avoid IndexError
+        min_len = min(
+            len(predicted),
+            len(close_prices),
+            len(high_prices),
+            len(low_prices),
+            len(open_prices),
+            len(volumes),
+            len(dates)
+        )
+        for i in range(min_len - 1):  # last prediction can't be traded (no next close)
             curr_close = close_prices[i]
             curr_open = open_prices[i]
             curr_high = high_prices[i]
@@ -270,6 +303,11 @@ def main():
 
             # Exit logic: only if in position
             if position == 1:
+                # Recalculate TP/SL each bar
+                entry_take_profit = take_profit_price
+                entry_stop_loss = stop_loss_price
+                bars_held += 1
+
                 # 1. Stop loss
                 if next_low <= entry_stop_loss:
                     pnl = (entry_stop_loss - entry_price) / entry_price
@@ -282,6 +320,7 @@ def main():
                         "exit", entry_price, entry_take_profit, entry_stop_loss, "stop_loss", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
                     )
                     position = 0
+                    bars_held = 0
                     exited_this_bar = True
                 # 2. Take profit (only if stop loss not triggered)
                 elif next_high >= entry_take_profit:
@@ -295,19 +334,21 @@ def main():
                         "exit", entry_price, entry_take_profit, entry_stop_loss, "take_profit", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
                     )
                     position = 0
+                    bars_held = 0
                     exited_this_bar = True
-                # 3. Exit at next close (only if neither triggered)
-                else:
+                # 3. Hold up to N_HOLD bars, then exit at next close
+                elif bars_held >= N_HOLD:
                     pnl = (next_close - entry_price) / entry_price
                     last_equity = last_equity * (1 + pnl)
                     equity.append(last_equity)
-                    log_trade(entry_date, entry_price, dates[i+1], next_close, pnl, "close")
+                    log_trade(entry_date, entry_price, dates[i+1], next_close, pnl, "max_hold")
                     pnl_detail = f"({next_close:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                     log_detailed(
                         dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
-                        "exit", entry_price, entry_take_profit, entry_stop_loss, "close", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                        "exit", entry_price, entry_take_profit, entry_stop_loss, "max_hold", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
                     )
                     position = 0
+                    bars_held = 0
                     exited_this_bar = True
 
             # Entry logic: only if not in position and did not just exit
@@ -319,6 +360,7 @@ def main():
                     entry_date = curr_date
                     entry_take_profit = take_profit_price
                     entry_stop_loss = stop_loss_price
+                    bars_held = 1
                     log_detailed(
                         curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
                         "entry", entry_price, entry_take_profit, entry_stop_loss, "", 0, 0, ""
@@ -333,7 +375,7 @@ def main():
                 # Log holding bar
                 log_detailed(
                     curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                    "holding", entry_price, entry_take_profit, entry_stop_loss, "", 0, 0, ""
+                    "holding", entry_price, entry_take_profit, entry_stop_loss, "", 0, 0, f"bars_held={bars_held}"
                 )
 
             # If not in position, keep equity flat (append last_equity)
@@ -383,13 +425,18 @@ def main():
         ax1 = plt.gca()
         ax2 = ax1.twinx()
 
+        # Ensure equity and dates are the same length for plotting
+        min_len = min(len(dates), len(equity))
+        plot_dates = dates[:min_len]
+        plot_equity = equity[:min_len]
+
         # Plot equity curve (right Y-axis)
-        l1, = ax1.plot(dates, equity[:len(dates)], label='Equity Curve', color='blue')
+        l1, = ax1.plot(plot_dates, plot_equity, label='Equity Curve', color='blue')
         ax1.set_ylabel('Equity ($)', color='blue')
         ax1.tick_params(axis='y', labelcolor='blue')
 
         # Plot price curve (left Y-axis, semi-transparent orange)
-        l2, = ax2.plot(dates, close_prices[:len(dates)], label='Price', color='orange', alpha=0.5)
+        l2, = ax2.plot(plot_dates, close_prices[:min_len], label='Price', color='orange', alpha=0.5)
         ax2.set_ylabel('Price', color='orange')
         ax2.tick_params(axis='y', labelcolor='orange')
 
