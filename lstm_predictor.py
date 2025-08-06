@@ -165,7 +165,7 @@ def main():
                         break
 
             this_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_turn{turn_idx+1}"
-            this_model_file = f"data/model_{this_timestamp}.pt"
+            this_model_file = f"data/model_{symbol}_{this_timestamp}.pt"
             torch.save(model.state_dict(), this_model_file)
             print(f"Saved trained model weights to {this_model_file}.")
         else:
