@@ -49,6 +49,8 @@ def main():
                         help='If set, load model from file and skip training')
     parser.add_argument('--n_hold', type=int, default=1,
                         help='Number of bars ahead to predict (N_HOLD-th bar after the sequence)')
+    parser.add_argument('--n_turn', type=int, default=1,
+                        help='Number of times to repeat training and backtesting (default: 1)')
     args = parser.parse_args()
 
     datafile = args.datafile
@@ -56,6 +58,7 @@ def main():
     N_HOLD = args.n_hold
     model_file = args.model_file
     no_train = args.no_train
+    N_TURN = args.n_turn
 
     if not os.path.exists(datafile):
         raise FileNotFoundError(f"Data file not found: {datafile}")
@@ -117,100 +120,122 @@ def main():
             _, (h, _) = self.lstm(x)
             return self.fc(h[-1])
 
-    model = LSTMPriceModel()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    loss_fn = nn.MSELoss()
+    def run_one_turn(turn_idx, timestamp):
+        model = LSTMPriceModel()
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        loss_fn = nn.MSELoss()
+        this_model_file = model_file
+        this_timestamp = timestamp
+        if not no_train:
+            # Train with early stopping
+            best_loss = float('inf')
+            patience = 2  # Number of epochs to wait for improvement
+            patience_counter = 0
+            min_delta = 1e-4  # Minimum improvement to reset patience
+
+            for epoch in range(10):
+                total_loss = 0
+                for batch_x, batch_y in train_loader:
+                    pred = model(batch_x)
+                    loss = loss_fn(pred, batch_y)
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    total_loss += loss.item()
+                avg_loss = total_loss / len(train_loader)
+                print(f"Turn {turn_idx+1} Epoch {epoch+1} Loss: {avg_loss:.4f}")
+
+                # Early stopping logic
+                if best_loss - avg_loss > min_delta:
+                    best_loss = avg_loss
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                    if patience_counter >= patience:
+                        print(f"Early stopping at epoch {epoch+1} (no significant improvement for {patience} epochs).")
+                        break
+
+            this_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_turn{turn_idx+1}"
+            this_model_file = f"data/model_{this_timestamp}.pt"
+            torch.save(model.state_dict(), this_model_file)
+            print(f"Saved trained model weights to {this_model_file}.")
+        else:
+            if not os.path.exists(model_file):
+                raise FileNotFoundError(f"Model file not found: {model_file}")
+            model.load_state_dict(torch.load(model_file, map_location=torch.device('cpu')))
+            print(f"Loaded model weights from {model_file}. Skipping training.")
+
+        # Predict
+        model.eval()
+        with torch.no_grad():
+            pred = model(torch.tensor(X_test, dtype=torch.float32)).numpy()
+
+        # Inverse transform
+        def inverse_high_low(vals):
+            dummy = np.zeros((len(vals), 6))
+            dummy[:, 1:3] = vals
+            return scaler.inverse_transform(dummy)[:, 1:3]
+
+        true = inverse_high_low(y_test)
+        predicted = inverse_high_low(pred)
+
+        # Step 1: Get full index of original data
+        date_index = df.index[SEQ_LEN + split + 1:]  # +1 for prediction shift
+
+        # Step 2: Select the first 100 timestamps for the plotted range
+        plot_dates = date_index[:100]
+
+        # Print chart start date
+        if len(plot_dates) > 0:
+            print("Chart start date:", plot_dates[0].strftime('%Y-%m-%d'))
+
+        # Step 3: Plot with datetime x-axis
+        plt.figure(figsize=(14, 6))
+        plt.plot(plot_dates, true[:100, 0], label="True High")
+        plt.plot(plot_dates, predicted[:100, 0], label="Pred High", linestyle="--")
+        plt.plot(plot_dates, true[:100, 1], label="True Low")
+        plt.plot(plot_dates, predicted[:100, 1], label="Pred Low", linestyle="--")
+
+        plt.legend()
+        plt.title(f"{symbol} LSTM Predicted vs True High/Low ({timeframe} timeframe)")
+        plt.xlabel("Datetime")
+        plt.ylabel("Price")
+        plt.xticks(rotation=45)
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(f"data/lstm_predictions_{symbol}_{timeframe}_turn{turn_idx+1}.png")
+
+        # === Long-only Trading Strategy Backtest ===
+        threshold = float(os.environ.get('LSTM_STRATEGY_THRESHOLD', 0.002))
+        trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_long_only_strategy(
+            true, predicted, date_index, df, split, SEQ_LEN, this_timestamp, WRITE_CSV, threshold
+        )
+        print(f"Backtest Metrics (Turn {turn_idx+1}):")
+        print(f"  Total Return: {total_return*100:.2f}%")
+        print(f"  Number of Trades: {number_of_trades}")
+        print(f"  Win Rate: {win_rate*100:.2f}%")
+        print(f"  Max Drawdown: {max_drawdown*100:.2f}%")
+        return this_model_file, total_return, number_of_trades, win_rate, max_drawdown
 
     if no_train:
-        if not os.path.exists(model_file):
-            raise FileNotFoundError(f"Model file not found: {model_file}")
-        model.load_state_dict(torch.load(model_file, map_location=torch.device('cpu')))
-        print(f"Loaded model weights from {model_file}. Skipping training.")
+        # Only run one turn for no_train (load model and backtest)
+        results = []
+        model_file_name, total_return, number_of_trades, win_rate, max_drawdown = run_one_turn(0, timestamp)
+        results.append([model_file_name, total_return, number_of_trades, win_rate, max_drawdown])
     else:
-        # Train with early stopping
-        best_loss = float('inf')
-        patience = 2  # Number of epochs to wait for improvement
-        patience_counter = 0
-        min_delta = 1e-4  # Minimum improvement to reset patience
+        results = []
+        for turn in range(N_TURN):
+            model_file_name, total_return, number_of_trades, win_rate, max_drawdown = run_one_turn(turn, timestamp)
+            results.append([model_file_name, total_return, number_of_trades, win_rate, max_drawdown])
 
-        for epoch in range(10):
-            total_loss = 0
-            for batch_x, batch_y in train_loader:
-                pred = model(batch_x)
-                loss = loss_fn(pred, batch_y)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
-            avg_loss = total_loss / len(train_loader)
-            print(f"Epoch {epoch+1} Loss: {avg_loss:.4f}")
-
-            # Early stopping logic
-            if best_loss - avg_loss > min_delta:
-                best_loss = avg_loss
-                patience_counter = 0
-            else:
-                patience_counter += 1
-                if patience_counter >= patience:
-                    print(f"Early stopping at epoch {epoch+1} (no significant improvement for {patience} epochs).")
-                    break
-
-        model_file = f"data/model_{timestamp}.pt"
-        torch.save(model.state_dict(), model_file)
-        print(f"Saved trained model weights to {model_file}.")
-
-    # Predict
-    model.eval()
-    with torch.no_grad():
-        pred = model(torch.tensor(X_test, dtype=torch.float32)).numpy()
-
-    # Inverse transform
-    def inverse_high_low(vals):
-        dummy = np.zeros((len(vals), 6))
-        dummy[:, 1:3] = vals
-        return scaler.inverse_transform(dummy)[:, 1:3]
-
-    true = inverse_high_low(y_test)
-    predicted = inverse_high_low(pred)
-
-    # Step 1: Get full index of original data
-    date_index = df.index[SEQ_LEN + split + 1:]  # +1 for prediction shift
-
-    # Step 2: Select the first 100 timestamps for the plotted range
-    plot_dates = date_index[:100]
-
-    # Print chart start date
-    if len(plot_dates) > 0:
-        print("Chart start date:", plot_dates[0].strftime('%Y-%m-%d'))
-
-    # Step 3: Plot with datetime x-axis
-    plt.figure(figsize=(14, 6))
-    plt.plot(plot_dates, true[:100, 0], label="True High")
-    plt.plot(plot_dates, predicted[:100, 0], label="Pred High", linestyle="--")
-    plt.plot(plot_dates, true[:100, 1], label="True Low")
-    plt.plot(plot_dates, predicted[:100, 1], label="Pred Low", linestyle="--")
-
-    plt.legend()
-    plt.title(f"{symbol} LSTM Predicted vs True High/Low ({timeframe} timeframe)")
-    plt.xlabel("Datetime")
-    plt.ylabel("Price")
-    plt.xticks(rotation=45)
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(f"data/lstm_predictions_{symbol}_{timeframe}.png")
-
-    # === Long-only Trading Strategy Backtest ===
-    threshold = float(os.environ.get('LSTM_STRATEGY_THRESHOLD', 0.002))
-    trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_long_only_strategy(
-        true, predicted, date_index, df, split, SEQ_LEN, timestamp, WRITE_CSV, threshold
-    )
-    # Print or return the metrics so the caller can capture them
-    print(f"Backtest Metrics:")
-    print(f"  Total Return: {total_return*100:.2f}%")
-    print(f"  Number of Trades: {number_of_trades}")
-    print(f"  Win Rate: {win_rate*100:.2f}%")
-    print(f"  Max Drawdown: {max_drawdown*100:.2f}%")
-    return total_return, number_of_trades, win_rate, max_drawdown
+    # Print summary table
+    print("\n=== Summary of All Turns ===")
+    print("{:<35} {:>12} {:>15} {:>10} {:>15}".format("Model File", "Total Return", "Num Trades", "Win Rate", "Max Drawdown"))
+    for row in results:
+        print("{:<35} {:>12.2f}% {:>15} {:>10.2f}% {:>15.2f}%".format(
+            os.path.basename(row[0]), row[1]*100, row[2], row[3]*100, row[4]*100
+        ))
+    return results
 
 if __name__ == "__main__":
     main()
