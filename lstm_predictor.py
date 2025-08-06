@@ -89,11 +89,19 @@ def main():
     scaled = scaler.fit_transform(df)
 
     # Sequence
-    # For each i, X = sequence of SEQ_LEN, y = [high, low] of (SEQ_LEN + PREDICT_AHEAD - 1)-th bar after i
+    # For each i, X = sequence of SEQ_LEN (scaled), y = [high_return, low_return] of (SEQ_LEN + PREDICT_AHEAD - 1)-th bar after i (computed from original prices)
     X, y = [], []
+    df_values = df.values  # original (unscaled) values, columns: ['open', 'high', 'low', 'close', 'volume', 'change']
     for i in range(len(scaled) - SEQ_LEN - PREDICT_AHEAD + 1):
         X.append(scaled[i:i+SEQ_LEN])
-        y.append(scaled[i+SEQ_LEN+PREDICT_AHEAD-1][1:3])  # predict [high, low] of PREDICT_AHEAD-th bar after the sequence
+        # Use original prices for return calculation
+        current_close = df_values[i+SEQ_LEN-1][3]  # close column
+        future_high = df_values[i+SEQ_LEN+PREDICT_AHEAD-1][1]  # high column
+        future_low = df_values[i+SEQ_LEN+PREDICT_AHEAD-1][2]   # low column
+        
+        high_return = (future_high - current_close) / current_close
+        low_return = (future_low - current_close) / current_close
+        y.append([high_return, low_return])
     X, y = np.array(X), np.array(y)
 
     # Train/test split
@@ -180,14 +188,22 @@ def main():
         with torch.no_grad():
             pred = model(torch.tensor(X_test, dtype=torch.float32)).numpy()
 
-        # Inverse transform
-        def inverse_high_low(vals):
-            dummy = np.zeros((len(vals), 6))
-            dummy[:, 1:3] = vals
-            return scaler.inverse_transform(dummy)[:, 1:3]
+        # Reconstruct high/low prices from predicted/true returns and current close price
+        def reconstruct_high_low_from_return(returns, closes):
+            # returns: shape (N, 2), closes: shape (N,)
+            # high = close * (1 + high_return), low = close * (1 + low_return)
+            high = closes * (1 + returns[:, 0])
+            low = closes * (1 + returns[:, 1])
+            return np.stack([high, low], axis=1)
 
-        true = inverse_high_low(y_test)
-        predicted = inverse_high_low(pred)
+        # Get the close price at the end of each input sequence in the test set (for plotting)
+        test_close = []
+        for i in range(split, split + len(X_test)):
+            test_close.append(df_values[i+SEQ_LEN-1][3])  # original close price
+        test_close = np.array(test_close)
+
+        true = reconstruct_high_low_from_return(y_test, test_close)
+        predicted = reconstruct_high_low_from_return(pred, test_close)
 
         # Step 1: Get full index of original data
         date_index = df.index[SEQ_LEN + split:]  # fixed: removed +1 to match X_test length
@@ -214,13 +230,13 @@ def main():
 
         # Step 3: Plot with datetime x-axis
         plt.figure(figsize=(14, 6))
-        plt.plot(plot_dates, true_plot[:, 0], label="True High")
-        plt.plot(plot_dates, predicted_plot[:, 0], label="Pred High", linestyle="--")
-        plt.plot(plot_dates, true_plot[:, 1], label="True Low")
-        plt.plot(plot_dates, predicted_plot[:, 1], label="Pred Low", linestyle="--")
+        plt.plot(plot_dates, true_plot[:, 0], label="True High (reconstructed)")
+        plt.plot(plot_dates, predicted_plot[:, 0], label="Pred High (reconstructed)", linestyle="--")
+        plt.plot(plot_dates, true_plot[:, 1], label="True Low (reconstructed)")
+        plt.plot(plot_dates, predicted_plot[:, 1], label="Pred Low (reconstructed)", linestyle="--")
 
         plt.legend()
-        plt.title(f"{symbol} LSTM Predicted vs True High/Low ({timeframe} timeframe)")
+        plt.title(f"{symbol} LSTM Predicted vs True High/Low (returns target, {timeframe} timeframe)")
         plt.xlabel("Datetime")
         plt.ylabel("Price")
         plt.xticks(rotation=45)
