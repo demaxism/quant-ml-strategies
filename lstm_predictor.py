@@ -247,7 +247,7 @@ def main():
         # === Long-only Trading Strategy Backtest ===
         threshold = float(os.environ.get('LSTM_STRATEGY_THRESHOLD', 0.002))
         trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_long_only_strategy(
-            true, predicted, date_index, df, split, SEQ_LEN, N_HOLD, this_timestamp, WRITE_CSV, REVERT_PROFIT, threshold, symbol
+            true, predicted, date_index, df, split, SEQ_LEN, N_HOLD, this_timestamp, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol
         )
         print(f"Backtest Metrics (Turn {turn_idx+1}):")
         print(f"  Total Return: {total_return*100:.2f}%")
