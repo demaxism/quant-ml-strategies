@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import os
 
 def backtest_long_only_strategy(
-    true, predicted, date_index, df, split, SEQ_LEN, timestamp, WRITE_CSV=False, REVERT_PROFIT=False, threshold=0.008, allowance=0.002
+    true, predicted, date_index, df, split, SEQ_LEN, N_HOLD, timestamp, WRITE_CSV=False, REVERT_PROFIT=False, threshold=0.008, allowance=0.002
 ):
     """
     true: [N, 2] array of true [high, low] (not used here), but we use close prices from df
@@ -38,7 +38,6 @@ def backtest_long_only_strategy(
     entry_take_profit = None
     entry_stop_loss = None
     bars_held = 0  # Number of bars position has been held
-    N_HOLD = 5     # Max bars to hold if no TP/SL (can be parameterized)
     trade_log = []
     last_equity = equity[-1]
 
@@ -245,7 +244,7 @@ def backtest_long_only_strategy(
     ax1 = plt.gca()
     ax2 = ax1.twinx()
 
-    min_len = min(len(dates), len(equity))
+    min_len = min(len(dates), len(equity), len(close_prices))
     plot_dates = dates[:min_len]
     plot_equity = equity[:min_len]
 

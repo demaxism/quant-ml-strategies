@@ -2,7 +2,7 @@
 # It loads data from a feather file, normalizes it, creates sequences for LSTM input,
 # trains an LSTM model, and evaluates its predictions. It also includes a long-only trading
 # strategy backtest based on the predicted high and low prices.
-#   For each bar in the test set, it predicts the high and low prices N_HOLD bars ahead.
+#   For each bar in the test set, it predicts the high and low prices PREDICT_AHEAD bars ahead.
 #   It entry logic is based on a threshold above the current close price,
 #   and exit logic includes stop loss, take profit, and maximum hold time (N_HOLD).
 # The script can be run from the command line with options for the data file and sequence length
@@ -41,14 +41,16 @@ def main():
     parser = argparse.ArgumentParser(description="Generic LSTM price predictor")
     parser.add_argument('--datafile', type=str, default='data/ETH_USDT-1h.feather',
                         help='Path to input feather file (e.g., data/ETH_USDT-4h.feather)')
-    parser.add_argument('--seq_len', type=int, default=48,
+    parser.add_argument('--seq_len', type=int, default=12,
                         help='Number of past candles to use for prediction')
+    parser.add_argument('--predict_ahead', type=int, default=1,
+                        help='Number of bars ahead to predict (N bar after the sequence)')
     parser.add_argument('--model_file', type=str, default='lstm_model.pth',
                         help='Path to save/load the LSTM model weights')
     parser.add_argument('--no_train', action='store_true',
                         help='If set, load model from file and skip training')
-    parser.add_argument('--n_hold', type=int, default=1,
-                        help='Number of bars ahead to predict (N_HOLD-th bar after the sequence)')
+    parser.add_argument('--n_hold', type=int, default=5,
+                        help='Number of bars to hold after entry (default: 5)')
     parser.add_argument('--n_turn', type=int, default=1,
                         help='Number of times to repeat training and backtesting (default: 1)')
     parser.add_argument('--revert_profit', action='store_true',
@@ -57,6 +59,7 @@ def main():
 
     datafile = args.datafile
     SEQ_LEN = args.seq_len
+    PREDICT_AHEAD = args.predict_ahead
     N_HOLD = args.n_hold
     model_file = args.model_file
     no_train = args.no_train
@@ -86,11 +89,11 @@ def main():
     scaled = scaler.fit_transform(df)
 
     # Sequence
-    # For each i, X = sequence of SEQ_LEN, y = [high, low] of (SEQ_LEN + N_HOLD - 1)-th bar after i
+    # For each i, X = sequence of SEQ_LEN, y = [high, low] of (SEQ_LEN + PREDICT_AHEAD - 1)-th bar after i
     X, y = [], []
-    for i in range(len(scaled) - SEQ_LEN - N_HOLD + 1):
+    for i in range(len(scaled) - SEQ_LEN - PREDICT_AHEAD + 1):
         X.append(scaled[i:i+SEQ_LEN])
-        y.append(scaled[i+SEQ_LEN+N_HOLD-1][1:3])  # predict [high, low] of N_HOLD-th bar after the sequence
+        y.append(scaled[i+SEQ_LEN+PREDICT_AHEAD-1][1:3])  # predict [high, low] of PREDICT_AHEAD-th bar after the sequence
     X, y = np.array(X), np.array(y)
 
     # Train/test split
@@ -227,7 +230,7 @@ def main():
         # === Long-only Trading Strategy Backtest ===
         threshold = float(os.environ.get('LSTM_STRATEGY_THRESHOLD', 0.002))
         trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_long_only_strategy(
-            true, predicted, date_index, df, split, SEQ_LEN, this_timestamp, WRITE_CSV, REVERT_PROFIT, threshold
+            true, predicted, date_index, df, split, SEQ_LEN, N_HOLD, this_timestamp, WRITE_CSV, REVERT_PROFIT, threshold
         )
         print(f"Backtest Metrics (Turn {turn_idx+1}):")
         print(f"  Total Return: {total_return*100:.2f}%")
