@@ -227,13 +227,14 @@ def backtest_long_only_strategy(
     # Compute stats
     returns = np.array([t['pnl'] for t in trade_log])
     total_return = equity[-1] - 1.0
+    number_of_trades = len(trade_log)
     win_rate = np.mean(returns > 0) if len(returns) > 0 else 0
     max_drawdown = np.max(np.maximum.accumulate(equity[:-1]) - equity[:-1])
-    print(f"Backtest Results (Long-only, threshold={threshold*100:.2f}%):")
-    print(f"  Total Return: {total_return*100:.2f}%")
-    print(f"  Number of Trades: {len(trade_log)}")
-    print(f"  Win Rate: {win_rate*100:.2f}%")
-    print(f"  Max Drawdown: {max_drawdown*100:.2f}%")
+    # print(f"Backtest Results (Long-only, threshold={threshold*100:.2f}%):")
+    # print(f"  Total Return: {total_return*100:.2f}%")
+    # print(f"  Number of Trades: {number_of_trades}")
+    # print(f"  Win Rate: {win_rate*100:.2f}%")
+    # print(f"  Max Drawdown: {max_drawdown*100:.2f}%")
 
     # Plot equity curve with price overlay (separate Y-axes)
     plt.figure(figsize=(12, 5))
@@ -263,4 +264,4 @@ def backtest_long_only_strategy(
     plt.tight_layout()
     plt.savefig(f"data/lstm_equity_curve_equity_{timestamp}.png")
 
-    return trade_log, equity
+    return trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown
