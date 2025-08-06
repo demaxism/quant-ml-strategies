@@ -14,7 +14,7 @@ def backtest_long_only_strategy(
     SEQ_LEN: int, sequence length used in LSTM
     timestamp: str, for file naming
     WRITE_CSV: bool, whether to write detailed log to CSV
-    threshold: float, e.g. 0.002 for 0.2%
+    threshold: float, e.g. 0.002 for 0.2%; entry condition: pred_high > curr_close * (1 + threshold)
     allowance: float, take profit/stop loss trigger as a fraction (default 0.002 = 0.2%)
     """
     import csv
