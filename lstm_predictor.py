@@ -25,7 +25,7 @@ from backtest_long_only_strategy import backtest_long_only_strategy
 
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-WRITE_CSV = False  # Set to False to disable CSV logging
+WRITE_CSV = True  # Set to False to disable CSV logging
 
 def parse_symbol_timeframe(filepath):
     # Try to extract SYMBOL-TIMEFRAME from filename, e.g. ETH_USDT-4h
@@ -59,6 +59,9 @@ def main():
     model_file = args.model_file
     no_train = args.no_train
     N_TURN = args.n_turn
+    # choose to plot first or last N predictions
+    plot_first = None  # Default to plot first 100 predictions
+    plot_last = 3000  # Default to plot last 100 predictions
 
     if not os.path.exists(datafile):
         raise FileNotFoundError(f"Data file not found: {datafile}")
@@ -120,7 +123,7 @@ def main():
             _, (h, _) = self.lstm(x)
             return self.fc(h[-1])
 
-    def run_one_turn(turn_idx, timestamp):
+    def run_one_turn(turn_idx, timestamp, plot_first=None, plot_last=None):
         model = LSTMPriceModel()
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         loss_fn = nn.MSELoss()
@@ -182,8 +185,21 @@ def main():
         # Step 1: Get full index of original data
         date_index = df.index[SEQ_LEN + split + 1:]  # +1 for prediction shift
 
-        # Step 2: Select the first 100 timestamps for the plotted range
-        plot_dates = date_index[:100]
+        # Step 2: Select the plotting range based on user input
+        if plot_first is not None and plot_last is not None:
+            raise ValueError("Only one of --plot_first or --plot_last can be set.")
+        if plot_first is not None:
+            plot_dates = date_index[:plot_first]
+            true_plot = true[:plot_first]
+            predicted_plot = predicted[:plot_first]
+        elif plot_last is not None:
+            plot_dates = date_index[-plot_last:]
+            true_plot = true[-plot_last:]
+            predicted_plot = predicted[-plot_last:]
+        else:
+            plot_dates = date_index[:100]
+            true_plot = true[:100]
+            predicted_plot = predicted[:100]
 
         # Print chart start date
         if len(plot_dates) > 0:
@@ -191,10 +207,10 @@ def main():
 
         # Step 3: Plot with datetime x-axis
         plt.figure(figsize=(14, 6))
-        plt.plot(plot_dates, true[:100, 0], label="True High")
-        plt.plot(plot_dates, predicted[:100, 0], label="Pred High", linestyle="--")
-        plt.plot(plot_dates, true[:100, 1], label="True Low")
-        plt.plot(plot_dates, predicted[:100, 1], label="Pred Low", linestyle="--")
+        plt.plot(plot_dates, true_plot[:, 0], label="True High")
+        plt.plot(plot_dates, predicted_plot[:, 0], label="Pred High", linestyle="--")
+        plt.plot(plot_dates, true_plot[:, 1], label="True Low")
+        plt.plot(plot_dates, predicted_plot[:, 1], label="Pred Low", linestyle="--")
 
         plt.legend()
         plt.title(f"{symbol} LSTM Predicted vs True High/Low ({timeframe} timeframe)")
@@ -220,12 +236,12 @@ def main():
     if no_train:
         # Only run one turn for no_train (load model and backtest)
         results = []
-        model_file_name, total_return, number_of_trades, win_rate, max_drawdown = run_one_turn(0, timestamp)
+        model_file_name, total_return, number_of_trades, win_rate, max_drawdown = run_one_turn(0, timestamp, plot_first, plot_last)
         results.append([model_file_name, total_return, number_of_trades, win_rate, max_drawdown])
     else:
         results = []
         for turn in range(N_TURN):
-            model_file_name, total_return, number_of_trades, win_rate, max_drawdown = run_one_turn(turn, timestamp)
+            model_file_name, total_return, number_of_trades, win_rate, max_drawdown = run_one_turn(turn, timestamp, plot_first, plot_last)
             results.append([model_file_name, total_return, number_of_trades, win_rate, max_drawdown])
 
     # Print summary table
