@@ -43,7 +43,7 @@ def main():
                         help='Path to input feather file (e.g., data/ETH_USDT-4h.feather)')
     parser.add_argument('--seq_len', type=int, default=12,
                         help='Number of past candles to use for prediction')
-    parser.add_argument('--predict_ahead', type=int, default=1,
+    parser.add_argument('--predict_ahead', type=int, default=2,
                         help='Number of bars ahead to predict (N bar after the sequence)')
     parser.add_argument('--model_file', type=str, default='lstm_model.pth',
                         help='Path to save/load the LSTM model weights')
@@ -97,7 +97,8 @@ def main():
     X, y = np.array(X), np.array(y)
 
     # Train/test split
-    split = int(len(X) * 0.8)
+    training_percentage = 0.7
+    split = int(len(X) * training_percentage)
     X_train, y_train = X[:split], y[:split]
     X_test, y_test = X[split:], y[split:]
 

@@ -265,6 +265,6 @@ def backtest_long_only_strategy(
     ax1.legend(lines, labels, loc='upper left')
 
     plt.tight_layout()
-    plt.savefig(f"data/lstm_equity_curve_equity_{timestamp}.png")
+    plt.savefig(f"data/lstm_equity_curve_{timestamp}.png")
 
     return trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown
