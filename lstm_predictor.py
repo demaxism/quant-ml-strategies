@@ -51,6 +51,8 @@ def main():
                         help='Number of bars ahead to predict (N_HOLD-th bar after the sequence)')
     parser.add_argument('--n_turn', type=int, default=1,
                         help='Number of times to repeat training and backtesting (default: 1)')
+    parser.add_argument('--revert_profit', action='store_true',
+                        help='If set, all profit becomes loss and all loss becomes profit (simulate shorting)')
     args = parser.parse_args()
 
     datafile = args.datafile
@@ -58,10 +60,11 @@ def main():
     N_HOLD = args.n_hold
     model_file = args.model_file
     no_train = args.no_train
-    N_TURN = args.n_turn
+    N_TURN = args.n_turn    
+    REVERT_PROFIT = args.revert_profit
     # choose to plot first or last N predictions
     plot_first = None  # Default to plot first 100 predictions
-    plot_last = 3000  # Default to plot last 100 predictions
+    plot_last = 500  # Default to plot last 100 predictions
 
     if not os.path.exists(datafile):
         raise FileNotFoundError(f"Data file not found: {datafile}")
@@ -224,7 +227,7 @@ def main():
         # === Long-only Trading Strategy Backtest ===
         threshold = float(os.environ.get('LSTM_STRATEGY_THRESHOLD', 0.002))
         trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_long_only_strategy(
-            true, predicted, date_index, df, split, SEQ_LEN, this_timestamp, WRITE_CSV, threshold
+            true, predicted, date_index, df, split, SEQ_LEN, this_timestamp, WRITE_CSV, REVERT_PROFIT, threshold
         )
         print(f"Backtest Metrics (Turn {turn_idx+1}):")
         print(f"  Total Return: {total_return*100:.2f}%")

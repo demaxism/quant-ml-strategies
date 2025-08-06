@@ -2,11 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-# If True, all profit becomes loss and all loss becomes profit (simulate shorting)
-REVERT_PROFIT = False
-
 def backtest_long_only_strategy(
-    true, predicted, date_index, df, split, SEQ_LEN, timestamp, WRITE_CSV=False, threshold=0.008, allowance=0.002
+    true, predicted, date_index, df, split, SEQ_LEN, timestamp, WRITE_CSV=False, REVERT_PROFIT=False, threshold=0.008, allowance=0.002
 ):
     """
     true: [N, 2] array of true [high, low] (not used here), but we use close prices from df
