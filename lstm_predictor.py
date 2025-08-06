@@ -24,6 +24,8 @@ from datetime import datetime
 
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
+WRITE_CSV = False  # Set to False to disable CSV logging
+
 def parse_symbol_timeframe(filepath):
     # Try to extract SYMBOL-TIMEFRAME from filename, e.g. ETH_USDT-4h
     basename = os.path.basename(filepath)
@@ -242,6 +244,9 @@ def main():
         trade_log = []
         last_equity = equity[-1]
 
+        # For trailing stop logic
+        current_stop_loss = None
+
         detailed_log = []
 
         # Helper for trade log
@@ -309,20 +314,28 @@ def main():
             if position == 1:
                 bars_held += 1
 
-                # 1. Stop loss (use current bar's recalculated stop_loss_price)
-                if next_low <= stop_loss_price:
-                    pnl = (stop_loss_price - entry_price) / entry_price
+                # Trailing stop: only update stop_loss if it increases
+                if current_stop_loss is None:
+                    current_stop_loss = stop_loss_price
+                else:
+                    if stop_loss_price > current_stop_loss:
+                        current_stop_loss = stop_loss_price
+
+                # 1. Stop loss (use trailing current_stop_loss)
+                if next_low <= current_stop_loss:
+                    pnl = (current_stop_loss - entry_price) / entry_price
                     last_equity = last_equity * (1 + pnl)
                     equity.append(last_equity)
-                    log_trade(entry_date, entry_price, dates[i+1], stop_loss_price, pnl, "stop_loss")
-                    pnl_detail = f"({stop_loss_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
+                    log_trade(entry_date, entry_price, dates[i+1], current_stop_loss, pnl, "stop_loss")
+                    pnl_detail = f"({current_stop_loss:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                     log_detailed(
                         dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
-                        "exit", entry_price, take_profit_price, stop_loss_price, "stop_loss", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                        "exit", entry_price, take_profit_price, current_stop_loss, "stop_loss", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
                     )
                     position = 0
                     bars_held = 0
                     exited_this_bar = True
+                    current_stop_loss = None
                 # 2. Take profit (use current bar's recalculated take_profit_price)
                 elif next_high >= take_profit_price:
                     pnl = (take_profit_price - entry_price) / entry_price
@@ -332,11 +345,12 @@ def main():
                     pnl_detail = f"({take_profit_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                     log_detailed(
                         dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
-                        "exit", entry_price, take_profit_price, stop_loss_price, "take_profit", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                        "exit", entry_price, take_profit_price, current_stop_loss, "take_profit", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
                     )
                     position = 0
                     bars_held = 0
                     exited_this_bar = True
+                    current_stop_loss = None
                 # 3. Hold up to N_HOLD bars, then exit at next close
                 elif bars_held >= N_HOLD:
                     pnl = (next_close - entry_price) / entry_price
@@ -346,11 +360,12 @@ def main():
                     pnl_detail = f"({next_close:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                     log_detailed(
                         dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
-                        "exit", entry_price, take_profit_price, stop_loss_price, "max_hold", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                        "exit", entry_price, take_profit_price, current_stop_loss, "max_hold", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
                     )
                     position = 0
                     bars_held = 0
                     exited_this_bar = True
+                    current_stop_loss = None
 
             # Entry logic: only if not in position and did not just exit
             if position == 0 and not exited_this_bar and pred_high > curr_close * (1 + threshold):
@@ -362,6 +377,7 @@ def main():
                     entry_take_profit = take_profit_price
                     entry_stop_loss = stop_loss_price
                     bars_held = 1
+                    current_stop_loss = stop_loss_price  # Initialize trailing stop at entry
                     log_detailed(
                         curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
                         "entry", entry_price, entry_take_profit, entry_stop_loss, "", 0, 0, ""
@@ -398,17 +414,18 @@ def main():
             equity.append(last_equity)
 
         # Write detailed log to CSV
-        log_filename = f"data/lstm_backtest_log_{timestamp}.csv"
-        log_columns = [
-            'datetime', 'open', 'high', 'low', 'close', 'volume',
-            'state', 'entry_price', 'take_profit', 'stop_loss', 'exit_method', 'pnl', 'abs_pnl', 'pnl_detail'
-        ]
-        with open(log_filename, 'w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=log_columns)
-            writer.writeheader()
-            for row in detailed_log:
-                writer.writerow(row)
-        print(f"Detailed backtest log written to {log_filename}")
+        if WRITE_CSV:
+            log_filename = f"data/lstm_backtest_log_{timestamp}.csv"
+            log_columns = [
+                'datetime', 'open', 'high', 'low', 'close', 'volume',
+                'state', 'entry_price', 'take_profit', 'stop_loss', 'exit_method', 'pnl', 'abs_pnl', 'pnl_detail'
+            ]
+            with open(log_filename, 'w', newline='') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=log_columns)
+                writer.writeheader()
+                for row in detailed_log:
+                    writer.writerow(row)
+            print(f"Detailed backtest log written to {log_filename}")
 
         # Compute stats
         returns = np.array([t['pnl'] for t in trade_log])
@@ -452,7 +469,7 @@ def main():
         ax1.legend(lines, labels, loc='upper left')
 
         plt.tight_layout()
-        plt.show()
+        plt.savefig(f"data/lstm_equity_curve_{symbol}_{timeframe}_equity.png")
 
         return trade_log, equity
 
