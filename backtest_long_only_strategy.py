@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import os
 
 def backtest_long_only_strategy(
-    true, predicted, date_index, df, split, SEQ_LEN, N_HOLD, timestamp, WRITE_CSV=False, REVERT_PROFIT=False, threshold=0.008, allowance=0.002
+    true, predicted, date_index, df, split, SEQ_LEN, N_HOLD, timestamp, WRITE_CSV=False, REVERT_PROFIT=False, threshold=0.008, allowance=0.002, symbol=None
 ):
     """
     true: [N, 2] array of true [high, low] (not used here), but we use close prices from df
@@ -256,7 +256,7 @@ def backtest_long_only_strategy(
     ax2.set_ylabel('Price', color='orange')
     ax2.tick_params(axis='y', labelcolor='orange')
 
-    plt.title('Equity Curve (Long-only Strategy) with Price Overlay')
+    plt.title(f'Equity Curve {symbol} with Price Overlay')
     ax1.set_xlabel('Date')
     ax1.grid(True)
 
@@ -265,6 +265,6 @@ def backtest_long_only_strategy(
     ax1.legend(lines, labels, loc='upper left')
 
     plt.tight_layout()
-    plt.savefig(f"data/lstm_equity_curve_{timestamp}.png")
+    plt.savefig(f"data/lstm_equity_curve_{symbol}_{timestamp}.png")
 
     return trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown
