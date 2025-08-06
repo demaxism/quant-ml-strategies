@@ -2,6 +2,9 @@
 # It loads data from a feather file, normalizes it, creates sequences for LSTM input,
 # trains an LSTM model, and evaluates its predictions. It also includes a long-only trading
 # strategy backtest based on the predicted high and low prices.
+#   For each bar in the test set, it predicts the high and low prices N_HOLD bars ahead.
+#   It entry logic is based on a threshold above the current close price,
+#   and exit logic includes stop loss, take profit, and maximum hold time (N_HOLD).
 # The script can be run from the command line with options for the data file and sequence length
 # sample: python lstm_predictor.py --datafile data/ETH_USDT-4h.feather --seq_len 48
 # Load model sameple: python lstm_predictor.py --datafile data/ETH_USDT-4h.feather --model_file 'lstm_model.pth' --no_train
@@ -298,40 +301,38 @@ def main():
             # Default state
             state = "flat"
             exit_method = ""
+            # Dynamically update take profit and stop loss for each holding bar
             take_profit_price = pred_high * (1 - allowance)
             stop_loss_price = pred_low * (1 + allowance)
 
             # Exit logic: only if in position
             if position == 1:
-                # Recalculate TP/SL each bar
-                entry_take_profit = take_profit_price
-                entry_stop_loss = stop_loss_price
                 bars_held += 1
 
-                # 1. Stop loss
-                if next_low <= entry_stop_loss:
-                    pnl = (entry_stop_loss - entry_price) / entry_price
+                # 1. Stop loss (use current bar's recalculated stop_loss_price)
+                if next_low <= stop_loss_price:
+                    pnl = (stop_loss_price - entry_price) / entry_price
                     last_equity = last_equity * (1 + pnl)
                     equity.append(last_equity)
-                    log_trade(entry_date, entry_price, dates[i+1], entry_stop_loss, pnl, "stop_loss")
-                    pnl_detail = f"({entry_stop_loss:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
+                    log_trade(entry_date, entry_price, dates[i+1], stop_loss_price, pnl, "stop_loss")
+                    pnl_detail = f"({stop_loss_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                     log_detailed(
                         dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
-                        "exit", entry_price, entry_take_profit, entry_stop_loss, "stop_loss", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                        "exit", entry_price, take_profit_price, stop_loss_price, "stop_loss", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
                     )
                     position = 0
                     bars_held = 0
                     exited_this_bar = True
-                # 2. Take profit (only if stop loss not triggered)
-                elif next_high >= entry_take_profit:
-                    pnl = (entry_take_profit - entry_price) / entry_price
+                # 2. Take profit (use current bar's recalculated take_profit_price)
+                elif next_high >= take_profit_price:
+                    pnl = (take_profit_price - entry_price) / entry_price
                     last_equity = last_equity * (1 + pnl)
                     equity.append(last_equity)
-                    log_trade(entry_date, entry_price, dates[i+1], entry_take_profit, pnl, "take_profit")
-                    pnl_detail = f"({entry_take_profit:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
+                    log_trade(entry_date, entry_price, dates[i+1], take_profit_price, pnl, "take_profit")
+                    pnl_detail = f"({take_profit_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                     log_detailed(
                         dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
-                        "exit", entry_price, entry_take_profit, entry_stop_loss, "take_profit", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                        "exit", entry_price, take_profit_price, stop_loss_price, "take_profit", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
                     )
                     position = 0
                     bars_held = 0
@@ -345,7 +346,7 @@ def main():
                     pnl_detail = f"({next_close:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                     log_detailed(
                         dates[i+1], open_prices[i+1], high_prices[i+1], low_prices[i+1], close_prices[i+1], volumes[i+1],
-                        "exit", entry_price, entry_take_profit, entry_stop_loss, "max_hold", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                        "exit", entry_price, take_profit_price, stop_loss_price, "max_hold", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
                     )
                     position = 0
                     bars_held = 0
