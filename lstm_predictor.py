@@ -22,6 +22,7 @@ import re
 import os
 from datetime import datetime
 from backtest_long_only_strategy import backtest_long_only_strategy
+from backtest_simulate import backtest_realtime_lstm
 
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -246,9 +247,15 @@ def main():
 
         # === Long-only Trading Strategy Backtest ===
         threshold = float(os.environ.get('LSTM_STRATEGY_THRESHOLD', 0.002))
-        trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_long_only_strategy(
-            true, predicted, date_index, df, split, SEQ_LEN, N_HOLD, this_timestamp, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol
-        )
+        if no_train:
+            # Use bar-by-bar real-time backtest
+            trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_realtime_lstm(
+                model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, this_timestamp, scaler, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol
+            )
+        else:
+            trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_long_only_strategy(
+                true, predicted, date_index, df, split, SEQ_LEN, N_HOLD, this_timestamp, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol
+            )
         print(f"Backtest Metrics (Turn {turn_idx+1}):")
         print(f"  Total Return: {total_return*100:.2f}%")
         print(f"  Number of Trades: {number_of_trades}")
