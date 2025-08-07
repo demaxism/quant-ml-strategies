@@ -138,8 +138,8 @@ def backtest_realtime_lstm(
                 bars_held = 0
                 exited_this_bar = True
 
-            # 2. Take profit (use pending TP)
-            elif curr_high >= take_profit_price:
+            # 2. Take profit (use pending TP), take profit after at least 2 bars
+            elif curr_high >= take_profit_price and bars_held > 2:
                 pnl = (take_profit_price - entry_price) / entry_price
                 pnl = -pnl if REVERT_PROFIT else pnl
                 last_equity = last_equity * (1 + pnl)
@@ -177,7 +177,7 @@ def backtest_realtime_lstm(
                 entry_price = curr_close
                 entry_date = curr_date
                 take_profit_price = pred_high * (1 - allowance)
-                stop_loss_price = entry_price - (take_profit_price - entry_price)
+                stop_loss_price = pred_low * (1 + allowance)
                 bars_held = 1
 
                 log_detailed(
