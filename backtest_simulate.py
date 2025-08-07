@@ -155,8 +155,15 @@ def backtest_realtime_lstm(
                     prev_stop_loss_price = None
                 # 0. Bar penetrate both TP/SL
                 elif curr_high >= prev_take_profit_price and curr_low <= current_stop_loss:
-                    # Take the median of the two prices as exit price
-                    exit_price = (prev_take_profit_price + current_stop_loss) / 2
+                    # Decide exit price based on distance to TP/SL
+                    mid = (curr_high + curr_low) / 2
+                    dist_to_tp = abs(prev_take_profit_price - mid)
+                    dist_to_sl = abs(current_stop_loss - mid)
+                    if dist_to_tp < dist_to_sl:
+                        exit_price = prev_take_profit_price
+                    else:
+                        exit_price = current_stop_loss
+                    
                     pnl = (exit_price - entry_price) / entry_price
                     pnl = -pnl if REVERT_PROFIT else pnl
                     last_equity = last_equity * (1 + pnl)
@@ -175,11 +182,16 @@ def backtest_realtime_lstm(
                     prev_stop_loss_price = None
                 # 1. Stop loss (use trailing current_stop_loss)
                 elif curr_low <= current_stop_loss:
-                    # If current open is below stop loss, exit at open
                     if curr_open > current_stop_loss:
                         exit_price = current_stop_loss
                     else:
-                        exit_price = curr_open
+                        # If current open is below stop loss
+                        # Then exit at stop loss price if luckily hit
+                        if curr_high >= current_stop_loss:
+                            exit_price = current_stop_loss
+                        else:
+                            # Otherwise exit at current close
+                            exit_price = curr_close
                     pnl_detail = f"({exit_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                 
                     pnl = (exit_price - entry_price) / entry_price
@@ -296,34 +308,35 @@ def backtest_realtime_lstm(
     win_rate = np.mean(returns > 0) if len(returns) > 0 else 0
     max_drawdown = np.max(np.maximum.accumulate(equity[:-1]) - equity[:-1])
 
-    # Plot equity curve with price overlay (separate Y-axes)
-    plt.figure(figsize=(12, 5))
-    ax1 = plt.gca()
-    ax2 = ax1.twinx()
+    if WRITE_CSV:
+        # Plot equity curve with price overlay (separate Y-axes)
+        plt.figure(figsize=(12, 5))
+        ax1 = plt.gca()
+        ax2 = ax1.twinx()
 
-    # print the length of equity_dates, equity, close_prices
-    print(f"equity_dates length: {len(equity_dates)}, equity length: {len(equity)}, close_prices length: {len(close_prices)}")
-    min_len = min(len(equity_dates), len(equity), len(close_prices))
-    plot_dates = equity_dates[:min_len]
-    plot_equity = equity[:min_len]
+        # print the length of equity_dates, equity, close_prices
+        print(f"equity_dates length: {len(equity_dates)}, equity length: {len(equity)}, close_prices length: {len(close_prices)}")
+        min_len = min(len(equity_dates), len(equity), len(close_prices))
+        plot_dates = equity_dates[:min_len]
+        plot_equity = equity[:min_len]
 
-    l1, = ax1.plot(plot_dates, plot_equity, label='Equity Curve', color='blue')
-    ax1.set_ylabel('Equity ($)', color='blue')
-    ax1.tick_params(axis='y', labelcolor='blue')
+        l1, = ax1.plot(plot_dates, plot_equity, label='Equity Curve', color='blue')
+        ax1.set_ylabel('Equity ($)', color='blue')
+        ax1.tick_params(axis='y', labelcolor='blue')
 
-    l2, = ax2.plot(plot_dates, close_prices[:min_len], label='Price', color='orange', alpha=0.5)
-    ax2.set_ylabel('Price', color='orange')
-    ax2.tick_params(axis='y', labelcolor='orange')
+        l2, = ax2.plot(plot_dates, close_prices[:min_len], label='Price', color='orange', alpha=0.5)
+        ax2.set_ylabel('Price', color='orange')
+        ax2.tick_params(axis='y', labelcolor='orange')
 
-    plt.title(f'Equity Curve {symbol} (Realtime Sim) with Price Overlay')
-    ax1.set_xlabel('Date')
-    ax1.grid(True)
+        plt.title(f'Equity Curve {symbol} (Realtime Sim) with Price Overlay')
+        ax1.set_xlabel('Date')
+        ax1.grid(True)
 
-    lines = [l1, l2]
-    labels = [line.get_label() for line in lines]
-    ax1.legend(lines, labels, loc='upper left')
+        lines = [l1, l2]
+        labels = [line.get_label() for line in lines]
+        ax1.legend(lines, labels, loc='upper left')
 
-    plt.tight_layout()
-    plt.savefig(f"data/lstm_equity_curve_realtime_{symbol}_{timestamp}.png")
+        plt.tight_layout()
+        plt.savefig(f"data/lstm_equity_curve_realtime_{symbol}_{timestamp}.png")
 
     return trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown
