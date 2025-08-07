@@ -26,7 +26,7 @@ from backtest_simulate import backtest_realtime_lstm
 
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-WRITE_CSV = True  # Set to False to disable CSV logging
+WRITE_CSV = False  # Set to False to disable CSV logging
 
 def parse_symbol_timeframe(filepath):
     # Try to extract SYMBOL-TIMEFRAME from filename, e.g. ETH_USDT-4h
@@ -230,31 +230,29 @@ def main():
             print("Chart start date:", plot_dates[0].strftime('%Y-%m-%d'))
 
         # Step 3: Plot with datetime x-axis
-        plt.figure(figsize=(14, 6))
-        plt.plot(plot_dates, true_plot[:, 0], label="True High (reconstructed)")
-        plt.plot(plot_dates, predicted_plot[:, 0], label="Pred High (reconstructed)", linestyle="--")
-        plt.plot(plot_dates, true_plot[:, 1], label="True Low (reconstructed)")
-        plt.plot(plot_dates, predicted_plot[:, 1], label="Pred Low (reconstructed)", linestyle="--")
+        if WRITE_CSV:
+            plt.figure(figsize=(14, 6))
+            plt.plot(plot_dates, true_plot[:, 0], label="True High (reconstructed)")
+            plt.plot(plot_dates, predicted_plot[:, 0], label="Pred High (reconstructed)", linestyle="--")
+            plt.plot(plot_dates, true_plot[:, 1], label="True Low (reconstructed)")
+            plt.plot(plot_dates, predicted_plot[:, 1], label="Pred Low (reconstructed)", linestyle="--")
 
-        plt.legend()
-        plt.title(f"{symbol} LSTM Predicted vs True High/Low (returns target, {timeframe} timeframe)")
-        plt.xlabel("Datetime")
-        plt.ylabel("Price")
-        plt.xticks(rotation=45)
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(f"data/lstm_predictions_{symbol}_{timeframe}_turn{turn_idx+1}.png")
+            plt.legend()
+            plt.title(f"{symbol} LSTM Predicted vs True High/Low (returns target, {timeframe} timeframe)")
+            plt.xlabel("Datetime")
+            plt.ylabel("Price")
+            plt.xticks(rotation=45)
+            plt.grid(True)
+            plt.tight_layout()
+            plt.savefig(f"data/lstm_predictions_{symbol}_{timeframe}_turn{turn_idx+1}.png")
 
         # === Long-only Trading Strategy Backtest ===
         threshold = float(os.environ.get('LSTM_STRATEGY_THRESHOLD', 0.002))
-        if no_train:
-            # # Use bar-by-bar real-time backtest
+        if True:
+            # # # Use bar-by-bar real-time backtest
             trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_realtime_lstm(
                 model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, this_timestamp, scaler, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol
             )
-            # trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_long_only_strategy(
-            #     true, predicted, date_index, df, split, SEQ_LEN, N_HOLD, this_timestamp, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol
-            # )
         else:
             trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_long_only_strategy(
                 true, predicted, date_index, df, split, SEQ_LEN, N_HOLD, this_timestamp, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol
