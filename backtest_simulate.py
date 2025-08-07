@@ -22,7 +22,6 @@ def backtest_realtime_lstm(
     # Prepare test data
     df_values = df.values  # original (unscaled) values
     test_start = split
-    print(f"dbg001 test_start={test_start}, SEQ_LEN={SEQ_LEN}, PREDICT_AHEAD={PREDICT_AHEAD}")
     test_end = len(df) - PREDICT_AHEAD  # so we have enough bars for SEQ_LEN + PREDICT_AHEAD
 
     equity = [1.0]  # start with $1
@@ -303,7 +302,7 @@ def backtest_realtime_lstm(
     ax2 = ax1.twinx()
 
     # print the length of equity_dates, equity, close_prices
-    print(f"dbg002 equity_dates length: {len(equity_dates)}, equity length: {len(equity)}, close_prices length: {len(close_prices)}")
+    print(f"equity_dates length: {len(equity_dates)}, equity length: {len(equity)}, close_prices length: {len(close_prices)}")
     min_len = min(len(equity_dates), len(equity), len(close_prices))
     plot_dates = equity_dates[:min_len]
     plot_equity = equity[:min_len]
