@@ -124,12 +124,10 @@ def backtest_realtime_lstm(
                 # On entry bar, store current TP/SL for use in t1
                 prev_take_profit_price = take_profit_price
                 prev_stop_loss_price = stop_loss_price
-                equity.append(last_equity)
             elif bars_held == 2:
                 # On t1, update prev TP/SL for use in t2, but do not check TP/SL
                 prev_take_profit_price = take_profit_price
                 prev_stop_loss_price = stop_loss_price
-                equity.append(last_equity)
             else:
                 # bars_held >= 3: check TP/SL using previous bar's TP/SL prices
                 # Trailing stop: only update stop_loss if it increases
@@ -144,7 +142,6 @@ def backtest_realtime_lstm(
                     pnl = (curr_close - entry_price) / entry_price
                     pnl = -pnl if REVERT_PROFIT else pnl
                     last_equity = last_equity * (1 + pnl)
-                    equity.append(last_equity)
                     log_trade(entry_date, entry_price, curr_date, curr_close, pnl, "max_hold")
                     pnl_detail = f"({curr_close:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                     log_detailed(
@@ -164,7 +161,6 @@ def backtest_realtime_lstm(
                     pnl = (exit_price - entry_price) / entry_price
                     pnl = -pnl if REVERT_PROFIT else pnl
                     last_equity = last_equity * (1 + pnl)
-                    equity.append(last_equity)
                     log_trade(entry_date, entry_price, curr_date, exit_price, pnl, "both_penetrate")
                     pnl_detail = f"({exit_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                     log_detailed(
@@ -190,7 +186,6 @@ def backtest_realtime_lstm(
                     pnl = (exit_price - entry_price) / entry_price
                     pnl = -pnl if REVERT_PROFIT else pnl
                     last_equity = last_equity * (1 + pnl)
-                    equity.append(last_equity)
                     log_trade(entry_date, entry_price, curr_date, exit_price, pnl, "stop_loss")
                     log_detailed(
                         curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
@@ -214,7 +209,6 @@ def backtest_realtime_lstm(
                     pnl = (exit_price - entry_price) / entry_price
                     pnl = -pnl if REVERT_PROFIT else pnl
                     last_equity = last_equity * (1 + pnl)
-                    equity.append(last_equity)
                     log_trade(entry_date, entry_price, curr_date, prev_take_profit_price, pnl, "take_profit")
                     pnl_detail = f"({prev_take_profit_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                     log_detailed(
@@ -231,7 +225,6 @@ def backtest_realtime_lstm(
                     # After check, update prev TP/SL for next bar
                     prev_take_profit_price = take_profit_price
                     prev_stop_loss_price = stop_loss_price
-                    equity.append(last_equity)
 
             # If exited, reset prev TP/SL
             if exited_this_bar:
@@ -265,8 +258,7 @@ def backtest_realtime_lstm(
                 "holding", entry_price, entry_take_profit, entry_stop_loss, "", 0, 0, f"bars_held={bars_held}"
             )
 
-        if position == 0:
-            equity.append(last_equity)
+        equity.append(last_equity)
 
     # If still in position at the end, close at last close
     if position == 1:
