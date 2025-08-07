@@ -83,10 +83,6 @@ def backtest_realtime_lstm(
         seq_idx = i
         # Prepare input sequence: SEQ_LEN bars ending at seq_idx + SEQ_LEN - 1
         seq = df.iloc[seq_idx:seq_idx+SEQ_LEN]
-        # print the last few rows of seq for debugging
-        if i < test_start + 10: 
-            print("debug002 seq\n", seq.tail())
-            print("debug002 seq length:", seq.shape)
         seq_scaled = scaler.transform(seq)
         x = torch.tensor(seq_scaled, dtype=torch.float32).unsqueeze(0)  # shape (1, SEQ_LEN, features)
         model.eval()
@@ -96,9 +92,6 @@ def backtest_realtime_lstm(
         # Get current bar info (the last bar in the sequence)
         curr_idx = seq_idx + SEQ_LEN - 1
         curr_row = df.iloc[curr_idx]
-        # print the current row for debugging
-        if i < test_start + 10:
-            print(f"debug003 current row at index {curr_idx}:\n{curr_row}")
         curr_close = curr_row['close']
         curr_open = curr_row['open']
         curr_high = curr_row['high']
@@ -146,12 +139,18 @@ def backtest_realtime_lstm(
 
                 # 1. Stop loss (use trailing current_stop_loss)
                 if curr_low <= current_stop_loss:
-                    pnl = (current_stop_loss - entry_price) / entry_price
+                    # If current open is below stop loss, exit at open
+                    if curr_open > current_stop_loss:
+                        exit_price = current_stop_loss
+                        pnl_detail = f"({current_stop_loss:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
+                    else:
+                        exit_price = curr_open
+                        pnl_detail = f"({curr_open:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
+                    pnl = (exit_price - entry_price) / entry_price
                     pnl = -pnl if REVERT_PROFIT else pnl
                     last_equity = last_equity * (1 + pnl)
                     equity.append(last_equity)
-                    log_trade(entry_date, entry_price, curr_date, current_stop_loss, pnl, "stop_loss")
-                    pnl_detail = f"({current_stop_loss:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
+                    log_trade(entry_date, entry_price, curr_date, exit_price, pnl, "stop_loss")
                     log_detailed(
                         curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
                         "exit", entry_price, prev_take_profit_price, current_stop_loss, "stop_loss", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
@@ -164,7 +163,14 @@ def backtest_realtime_lstm(
                     prev_stop_loss_price = None
                 # 2. Take profit (use previous bar's take_profit_price)
                 elif curr_high >= prev_take_profit_price:
-                    pnl = (prev_take_profit_price - entry_price) / entry_price
+                    # If current open is above take profit, exit at open
+                    if curr_open > prev_take_profit_price:
+                        exit_price = curr_open
+                        pnl_detail = f"({curr_open:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
+                    else:
+                        exit_price = prev_take_profit_price
+                        pnl_detail = f"({prev_take_profit_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
+                    pnl = (exit_price - entry_price) / entry_price
                     pnl = -pnl if REVERT_PROFIT else pnl
                     last_equity = last_equity * (1 + pnl)
                     equity.append(last_equity)

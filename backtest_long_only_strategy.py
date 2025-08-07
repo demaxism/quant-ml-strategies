@@ -92,6 +92,7 @@ def backtest_long_only_strategy(
         curr_low = low_prices[i]
         curr_volume = volumes[i]
         curr_date = dates[i]
+        next_open = open_prices[i+1]
         next_close = close_prices[i+1]
         next_high = high_prices[i+1]
         next_low = low_prices[i+1]
@@ -120,6 +121,9 @@ def backtest_long_only_strategy(
             # 1. Stop loss (use trailing current_stop_loss)
             if next_low <= current_stop_loss:
                 pnl = (current_stop_loss - entry_price) / entry_price
+                if next_open < current_stop_loss:
+                    pnl = (next_open - entry_price) / entry_price
+                
                 pnl = -pnl if REVERT_PROFIT else pnl
                 last_equity = last_equity * (1 + pnl)
                 equity.append(last_equity)
