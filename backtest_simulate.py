@@ -109,8 +109,8 @@ def backtest_realtime_lstm(
 
     # Helper for detailed log
     def log_detailed(dt, o, h, l, c, v, state, entry_price, take_profit, stop_loss, exit_method, pnl, abs_pnl, pnl_detail="",
-                     ma30=None, diff_ma30=None, ma10=None, diff_ma10=None, rsi=None, bb_upper=None, bb_middle=None, bb_lower=None):
-        detailed_log.append({
+                     ma30=None, diff_ma30=None, ma10=None, diff_ma10=None, rsi=None, bb_upper=None, bb_middle=None, bb_lower=None, memo=""):
+        entry = {
             'datetime': dt,
             'open': o,
             'high': h,
@@ -132,8 +132,20 @@ def backtest_realtime_lstm(
             'rsi': rsi,
             'bb_upper': bb_upper,
             'bb_middle': bb_middle,
-            'bb_lower': bb_lower
-        })
+            'bb_lower': bb_lower,
+            'memo': memo
+        }
+        detailed_log.append(entry)
+        # If this is an exit with take_profit or stop_loss, annotate the entry
+        if state == "exit" and exit_method in ("take_profit", "stop_loss"):
+            # Find the most recent entry with matching entry_date and entry_price
+            for prev in reversed(detailed_log):
+                if prev['state'] == "entry" and prev['entry_price'] == entry_price and prev['datetime'] == entry_date:
+                    if exit_method == "take_profit":
+                        prev['memo'] = "will_win"
+                    elif exit_method == "stop_loss":
+                        prev['memo'] = "will_lose"
+                    break
 
     # Main loop: iterate over fine_df bars in test set
     for i in range(test_start, test_end):
@@ -434,7 +446,7 @@ def backtest_realtime_lstm(
         log_columns = [
             'datetime', 'open', 'high', 'low', 'close', 'volume',
             'state', 'entry_price', 'take_profit', 'stop_loss', 'exit_method', 'pnl', 'abs_pnl', 'pnl_detail',
-            'ma30', 'diff_ma30', 'ma10', 'diff_ma10', 'rsi', 'bb_upper', 'bb_middle', 'bb_lower'
+            'ma30', 'diff_ma30', 'ma10', 'diff_ma10', 'rsi', 'bb_upper', 'bb_middle', 'bb_lower', 'memo'
         ]
         with open(log_filename, 'w', newline='') as csvfile:
             import csv
