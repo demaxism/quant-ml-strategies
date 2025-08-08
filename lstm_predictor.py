@@ -26,8 +26,6 @@ from backtest_simulate import backtest_realtime_lstm
 
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-WRITE_CSV = False  # Set to False to disable CSV logging
-
 def parse_symbol_timeframe(filepath):
     # Try to extract SYMBOL-TIMEFRAME from filename, e.g. ETH_USDT-4h
     basename = os.path.basename(filepath)
@@ -56,6 +54,8 @@ def main():
                         help='Number of times to repeat training and backtesting (default: 1)')
     parser.add_argument('--revert_profit', action='store_true',
                         help='If set, all profit becomes loss and all loss becomes profit (simulate shorting)')
+    parser.add_argument('--csv', action='store_true',
+                        help='If set, enable CSV/Figure logging')
     args = parser.parse_args()
 
     datafile = args.datafile
@@ -66,6 +66,7 @@ def main():
     no_train = args.no_train
     N_TURN = args.n_turn    
     REVERT_PROFIT = args.revert_profit
+    WRITE_CSV = args.csv  # Enable CSV logging if --csv is set
     # choose to plot first or last N predictions
     plot_first = None  # Default to plot first 100 predictions
     plot_last = 500  # Default to plot last 100 predictions
@@ -133,7 +134,7 @@ def main():
     class LSTMPriceModel(nn.Module):
         def __init__(self):
             super().__init__()
-            self.lstm = nn.LSTM(6, 64, 2, batch_first=True)
+            self.lstm = nn.LSTM(6, 64, 3, batch_first=True)
             self.fc = nn.Sequential(nn.Linear(64, 64), nn.ReLU(), nn.Linear(64, 2))
         def forward(self, x):
             _, (h, _) = self.lstm(x)
