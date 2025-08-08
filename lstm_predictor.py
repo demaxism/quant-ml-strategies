@@ -69,7 +69,7 @@ def main():
     # choose to plot first or last N predictions
     plot_first = None  # Default to plot first 100 predictions
     plot_last = 500  # Default to plot last 100 predictions
-    LAYERS = 3  # Number of LSTM layers
+    LAYERS = 2  # Number of LSTM layers
 
     if not os.path.exists(datafile):
         raise FileNotFoundError(f"Data file not found: {datafile}")
