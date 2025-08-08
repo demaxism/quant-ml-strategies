@@ -6,7 +6,7 @@ import torch
 
 # Customize the test start shift (number of fine_df bars to skip at the start of test)
 # Just use to check if it has impact on results
-START_SHIFT = 4
+START_SHIFT = 0
 
 def backtest_realtime_lstm(
     model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, timestamp, scaler, WRITE_CSV=False, REVERT_PROFIT=False, threshold=0.008, allowance=0.002, symbol=None, fine_df=None
