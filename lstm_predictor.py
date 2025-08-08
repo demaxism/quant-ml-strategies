@@ -69,6 +69,7 @@ def main():
     # choose to plot first or last N predictions
     plot_first = None  # Default to plot first 100 predictions
     plot_last = 500  # Default to plot last 100 predictions
+    LAYERS = 3  # Number of LSTM layers
 
     if not os.path.exists(datafile):
         raise FileNotFoundError(f"Data file not found: {datafile}")
@@ -146,7 +147,7 @@ def main():
     class LSTMPriceModel(nn.Module):
         def __init__(self):
             super().__init__()
-            self.lstm = nn.LSTM(6, 64, 2, batch_first=True)
+            self.lstm = nn.LSTM(6, 64, LAYERS, batch_first=True)
             self.fc = nn.Sequential(nn.Linear(64, 64), nn.ReLU(), nn.Linear(64, 2))
         def forward(self, x):
             _, (h, _) = self.lstm(x)
@@ -188,7 +189,7 @@ def main():
                         break
 
             this_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_turn{turn_idx+1}"
-            this_model_file = f"data/model_{symbol}_{this_timestamp}.pt"
+            this_model_file = f"data/model_{symbol}_Ly{LAYERS}_Sq{SEQ_LEN}_Ah{PREDICT_AHEAD}_{this_timestamp}.pt"
             torch.save(model.state_dict(), this_model_file)
             print(f"Saved trained model weights to {this_model_file}.")
         else:

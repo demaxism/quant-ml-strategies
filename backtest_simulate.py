@@ -4,6 +4,10 @@ import matplotlib.pyplot as plt
 import os
 import torch
 
+# Customize the test start shift (number of fine_df bars to skip at the start of test)
+# Just use to check if it has impact on results
+START_SHIFT = 4
+
 def backtest_realtime_lstm(
     model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, timestamp, scaler, WRITE_CSV=False, REVERT_PROFIT=False, threshold=0.008, allowance=0.002, symbol=None, fine_df=None
 ):
@@ -34,7 +38,7 @@ def backtest_realtime_lstm(
     bars_per_df = int(round(df_freq / fine_freq))
 
     # Prepare test data
-    test_start = split * bars_per_df  # start at the corresponding fine_df index
+    test_start = split * bars_per_df + START_SHIFT  # start at the corresponding fine_df index, shifted by START_SHIFT
     test_end = len(fine_df) - PREDICT_AHEAD * bars_per_df  # enough fine bars for SEQ_LEN+PREDICT_AHEAD df bars
 
     equity = [1.0]  # start with $1
