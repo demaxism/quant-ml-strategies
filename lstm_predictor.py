@@ -297,6 +297,19 @@ def main():
             'low_mae': low_mae
         })
 
+        # Print top 3 results so far, sorted by total_return / max_drawdown
+        def _sort_key(row):
+            return row['total_return'] / row['max_drawdown'] if row['max_drawdown'] != 0 else float('inf')
+        top3 = sorted(results, key=_sort_key, reverse=True)[:3]
+        print("\nTop 3 results so far (by total_return / max_drawdown):")
+        print("{:<35} {:>12} {:>15}".format("Model File", "Total Return", "Max Drawdown"))
+        for row in top3:
+            print("{:<35} {:>12.2f}% {:>15.2f}%".format(
+                (os.path.basename(row['model_file']))[-20:],
+                row['total_return']*100,
+                row['max_drawdown']*100
+            ))
+
     # Sort results by (total_return / max_drawdown) descending, using column names
     def sort_key(row):
         return row['total_return'] / row['max_drawdown'] if row['max_drawdown'] != 0 else float('inf')
