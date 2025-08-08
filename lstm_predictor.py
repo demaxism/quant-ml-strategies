@@ -59,6 +59,7 @@ def main():
     args = parser.parse_args()
 
     datafile = args.datafile
+    fine_datafile = datafile.replace('-4h', '-1h')  # Fine data file path
     SEQ_LEN = args.seq_len
     PREDICT_AHEAD = args.predict_ahead
     N_HOLD = args.n_hold
@@ -83,8 +84,21 @@ def main():
     df['date'] = pd.to_datetime(df['date'])
     df.set_index('date', inplace=True)
 
+    # Load fine data if available
+    fine_df = None
+    if os.path.exists(fine_datafile):
+        fine_df = pd.read_feather(fine_datafile)
+        fine_df = fine_df[['date', 'open', 'high', 'low', 'close', 'volume']]
+        fine_df['change'] = fine_df['close'].pct_change().fillna(0)
+        fine_df['date'] = pd.to_datetime(fine_df['date'])
+        fine_df.set_index('date', inplace=True)
+
     print('start analyze')
+    print("==== Data Overview ====")
     print(df.head())
+    print("==== Fine Data Overview ====")
+    if fine_df is not None:
+        print(fine_df.head())
 
     # Normalize
     scaler = MinMaxScaler()
@@ -134,7 +148,7 @@ def main():
     class LSTMPriceModel(nn.Module):
         def __init__(self):
             super().__init__()
-            self.lstm = nn.LSTM(6, 64, 3, batch_first=True)
+            self.lstm = nn.LSTM(6, 64, 2, batch_first=True)
             self.fc = nn.Sequential(nn.Linear(64, 64), nn.ReLU(), nn.Linear(64, 2))
         def forward(self, x):
             _, (h, _) = self.lstm(x)
@@ -252,7 +266,7 @@ def main():
         if True:
             # # # Use bar-by-bar real-time backtest
             trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_realtime_lstm(
-                model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, this_timestamp, scaler, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol
+                model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, this_timestamp, scaler, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol, fine_df=fine_df
             )
         else:
             trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_long_only_strategy(
