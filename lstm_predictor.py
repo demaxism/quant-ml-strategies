@@ -46,8 +46,6 @@ def main():
                         help='Number of bars ahead to predict (N bar after the sequence)')
     parser.add_argument('--model_file', type=str, default='lstm_model.pth',
                         help='Path to save/load the LSTM model weights')
-    parser.add_argument('--no_train', action='store_true',
-                        help='If set, load model from file and skip training')
     parser.add_argument('--n_hold', type=int, default=5,
                         help='Number of bars to hold after entry (default: 5)')
     parser.add_argument('--n_turn', type=int, default=1,
@@ -64,7 +62,7 @@ def main():
     PREDICT_AHEAD = args.predict_ahead
     N_HOLD = args.n_hold
     model_file = args.model_file
-    no_train = args.no_train
+    no_train = True if len(model_file) < 2 else False
     N_TURN = args.n_turn    
     REVERT_PROFIT = args.revert_profit
     WRITE_CSV = args.csv  # Enable CSV logging if --csv is set
@@ -221,6 +219,11 @@ def main():
         true = reconstruct_high_low_from_return(y_test, test_close)
         predicted = reconstruct_high_low_from_return(pred, test_close)
 
+        # === Deviation Metric: Mean Absolute Error (MAE) for High and Low ===
+        high_mae = np.mean(np.abs(predicted[:, 0] - true[:, 0]))
+        low_mae = np.mean(np.abs(predicted[:, 1] - true[:, 1]))
+        print(f"Prediction Deviation Metrics: High MAE: {high_mae:.4f}, Low MAE: {low_mae:.4f} ")
+
         # Step 1: Get full index of original data
         date_index = df.index[SEQ_LEN + split:]  # fixed: removed +1 to match X_test length
 
@@ -277,30 +280,21 @@ def main():
         print(f"  Number of Trades: {number_of_trades}")
         print(f"  Win Rate: {win_rate*100:.2f}%")
         print(f"  Max Drawdown: {max_drawdown*100:.2f}%")
-        return this_model_file, total_return, number_of_trades, win_rate, max_drawdown
+        return this_model_file, total_return, number_of_trades, win_rate, max_drawdown, high_mae, low_mae
 
-    if no_train:
-        # Only run one turn for no_train (load model and backtest)
-        results = []
-        model_file_name, total_return, number_of_trades, win_rate, max_drawdown = run_one_turn(0, timestamp, plot_first, plot_last)
+    run_turns = N_TURN if not no_train else 1
+    results = []
+    for turn in range(run_turns):
+        model_file_name, total_return, number_of_trades, win_rate, max_drawdown, high_mae, low_mae = run_one_turn(turn, timestamp, plot_first, plot_last)
         results.append({
             'model_file': model_file_name,
             'total_return': total_return,
             'number_of_trades': number_of_trades,
             'win_rate': win_rate,
-            'max_drawdown': max_drawdown
+            'max_drawdown': max_drawdown,
+            'high_mae': high_mae,
+            'low_mae': low_mae
         })
-    else:
-        results = []
-        for turn in range(N_TURN):
-            model_file_name, total_return, number_of_trades, win_rate, max_drawdown = run_one_turn(turn, timestamp, plot_first, plot_last)
-            results.append({
-                'model_file': model_file_name,
-                'total_return': total_return,
-                'number_of_trades': number_of_trades,
-                'win_rate': win_rate,
-                'max_drawdown': max_drawdown
-            })
 
     # Sort results by (total_return / max_drawdown) descending, using column names
     def sort_key(row):
@@ -309,14 +303,16 @@ def main():
 
     # Print summary table
     print("\n=== Summary of All Turns ===")
-    print("{:<35} {:>12} {:>15} {:>10} {:>15}".format("Model File", "Total Return", "Num Trades", "Win Rate", "Max Drawdown"))
+    print("{:<35} {:>12} {:>15} {:>10} {:>15} {:>10} {:>10}".format("Model File", "Total Return", "Num Trades", "Win Rate", "Max Drawdown", "High MAE", "Low MAE"))
     for row in results_sorted:
-        print("{:<35} {:>12.2f}% {:>15} {:>10.2f}% {:>15.2f}%".format(
-            os.path.basename(row['model_file']),
+        print("{:<35} {:>12.2f}% {:>15} {:>10.2f}% {:>15.2f}% {:>10.2f} {:>10.2f} ".format(
+            (os.path.basename(row['model_file']))[-20:],
             row['total_return']*100,
             row['number_of_trades'],
             row['win_rate']*100,
-            row['max_drawdown']*100
+            row['max_drawdown']*100,
+            row['high_mae'],
+            row['low_mae']
         ))
     return results_sorted
 
