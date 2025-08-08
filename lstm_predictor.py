@@ -163,7 +163,7 @@ def main():
         if not no_train:
             # Train with early stopping
             best_loss = float('inf')
-            patience = 2  # Number of epochs to wait for improvement
+            patience = 3  # Number of epochs to wait for improvement
             patience_counter = 0
             min_delta = 1e-4  # Minimum improvement to reset patience
 
@@ -262,7 +262,7 @@ def main():
             plt.savefig(f"data/lstm_predictions_{symbol}_{timeframe}_turn{turn_idx+1}.png")
 
         # === Long-only Trading Strategy Backtest ===
-        threshold = float(os.environ.get('LSTM_STRATEGY_THRESHOLD', 0.002))
+        threshold = float(os.environ.get('LSTM_STRATEGY_THRESHOLD', 0.01))
         if True:
             # # # Use bar-by-bar real-time backtest
             trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_realtime_lstm(

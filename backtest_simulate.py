@@ -194,6 +194,9 @@ def backtest_realtime_lstm(
                         if prev_stop_loss_price > current_stop_loss:
                             current_stop_loss = prev_stop_loss_price
 
+                    # Always update take profit price per bar
+                    prev_take_profit_price = take_profit_price
+
                     if bars_held >= N_HOLD * bars_per_df:
                         pnl = (curr_close - entry_price) / entry_price
                         pnl = -pnl if REVERT_PROFIT else pnl
@@ -310,7 +313,7 @@ def backtest_realtime_lstm(
             elif position == 1 and not exited_this_bar:
                 log_detailed(
                     curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                    "holding", entry_price, entry_take_profit, entry_stop_loss, "", 0, 0, f"bars_held={bars_held}"
+                    "holding", entry_price, prev_take_profit_price, current_stop_loss, "", 0, 0, f"bars_held={bars_held}"
                 )
 
             equity.append(last_equity)
