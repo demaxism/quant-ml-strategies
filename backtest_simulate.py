@@ -8,6 +8,12 @@ import torch
 # Just use to check if it has impact on results
 START_SHIFT = 0
 
+# === Backtest date range control ===
+# Set BT_FROM and BT_UNTIL to limit the backtest to a specific date range in fine_df.
+# Use None to disable either bound. Format should match fine_df's index (e.g., '2022-01-01' or pd.Timestamp).
+BT_FROM = None   # e.g., '2022-01-01'
+BT_UNTIL = None  # e.g., '2023-01-01'
+
 def backtest_realtime_lstm(
     model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, timestamp, scaler, WRITE_CSV=False, REVERT_PROFIT=False, threshold=0.008, allowance=0.002, symbol=None, fine_df=None
 ):
@@ -29,6 +35,15 @@ def backtest_realtime_lstm(
         # Fallback to old behavior if fine_df not provided
         # (old code block here, omitted for brevity)
         raise ValueError("fine_df must be provided for fine-grained backtest.")
+
+    # === Filter fine_df by BT_FROM and BT_UNTIL if set ===
+    global BT_FROM, BT_UNTIL
+    if BT_FROM is not None and BT_UNTIL is not None:
+        fine_df = fine_df.loc[BT_FROM:BT_UNTIL].copy()
+    elif BT_FROM is not None:
+        fine_df = fine_df.loc[BT_FROM:].copy()
+    elif BT_UNTIL is not None:
+        fine_df = fine_df.loc[:BT_UNTIL].copy()
 
     # === Add technical indicators to fine_df ===
     # MA30 and diff
@@ -59,9 +74,21 @@ def backtest_realtime_lstm(
     bars_per_df = int(round(df_freq / fine_freq))
 
     # Prepare test data
-    test_start = split * bars_per_df + START_SHIFT  # start at the corresponding fine_df index, shifted by START_SHIFT
+    # Determine test_start based on BT_FROM
+    if BT_FROM is not None:
+        loc = fine_df.index.get_loc(BT_FROM)
+        if isinstance(loc, slice):
+            test_start = loc.start
+        elif isinstance(loc, (np.integer, int)):
+            test_start = int(loc)
+        else:
+            raise ValueError(f"Unexpected result from fine_df.index.get_loc(BT_FROM): {loc}")
+    else:
+        test_start = split * bars_per_df  # start at the corresponding fine_df index
+    test_start += START_SHIFT  # apply the start shift
     test_end = len(fine_df) - PREDICT_AHEAD * bars_per_df  # enough fine bars for SEQ_LEN+PREDICT_AHEAD df bars
 
+    print(f"test_start: {test_start}, test_end: {test_end}, fine_df length: {len(fine_df)}   ")
     equity = [1.0]  # start with $1
     position = 0    # 0 = flat, 1 = long
     entry_price = 0
