@@ -30,6 +30,27 @@ def backtest_realtime_lstm(
         # (old code block here, omitted for brevity)
         raise ValueError("fine_df must be provided for fine-grained backtest.")
 
+    # === Add technical indicators to fine_df ===
+    # MA30 and diff
+    fine_df['ma30'] = fine_df['close'].rolling(window=30).mean()
+    fine_df['diff_ma30'] = fine_df['ma30'].diff()
+    # MA10 and diff
+    fine_df['ma10'] = fine_df['close'].rolling(window=10).mean()
+    fine_df['diff_ma10'] = fine_df['ma10'].diff()
+    # RSI (14)
+    delta = fine_df['close'].diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(window=14).mean()
+    avg_loss = loss.rolling(window=14).mean()
+    rs = avg_gain / avg_loss
+    fine_df['rsi'] = 100 - (100 / (1 + rs))
+    # Bollinger Bands (20, 2)
+    fine_df['bb_middle'] = fine_df['close'].rolling(window=20).mean()
+    fine_df['bb_std'] = fine_df['close'].rolling(window=20).std()
+    fine_df['bb_upper'] = fine_df['bb_middle'] + 2 * fine_df['bb_std']
+    fine_df['bb_lower'] = fine_df['bb_middle'] - 2 * fine_df['bb_std']
+
     # Determine how many fine_df bars per df bar
     # Assume df and fine_df have the same symbol, and are continuous
     # Use the time difference between first two rows to infer frequency
@@ -87,7 +108,8 @@ def backtest_realtime_lstm(
         })
 
     # Helper for detailed log
-    def log_detailed(dt, o, h, l, c, v, state, entry_price, take_profit, stop_loss, exit_method, pnl, abs_pnl, pnl_detail=""):
+    def log_detailed(dt, o, h, l, c, v, state, entry_price, take_profit, stop_loss, exit_method, pnl, abs_pnl, pnl_detail="",
+                     ma30=None, diff_ma30=None, ma10=None, diff_ma10=None, rsi=None, bb_upper=None, bb_middle=None, bb_lower=None):
         detailed_log.append({
             'datetime': dt,
             'open': o,
@@ -102,7 +124,15 @@ def backtest_realtime_lstm(
             'exit_method': exit_method,
             'pnl': pnl,
             'abs_pnl': abs_pnl,
-            'pnl_detail': pnl_detail
+            'pnl_detail': pnl_detail,
+            'ma30': ma30,
+            'diff_ma30': diff_ma30,
+            'ma10': ma10,
+            'diff_ma10': diff_ma10,
+            'rsi': rsi,
+            'bb_upper': bb_upper,
+            'bb_middle': bb_middle,
+            'bb_lower': bb_lower
         })
 
     # Main loop: iterate over fine_df bars in test set
@@ -164,6 +194,16 @@ def backtest_realtime_lstm(
             curr_volume = fine_volume
             curr_date = fine_date
 
+            # Get indicator values for this bar
+            ma30 = fine_row.get('ma30', None)
+            diff_ma30 = fine_row.get('diff_ma30', None)
+            ma10 = fine_row.get('ma10', None)
+            diff_ma10 = fine_row.get('diff_ma10', None)
+            rsi = fine_row.get('rsi', None)
+            bb_upper = fine_row.get('bb_upper', None)
+            bb_middle = fine_row.get('bb_middle', None)
+            bb_lower = fine_row.get('bb_lower', None)
+
             # Reconstruct predicted high/low prices from last df bar's close
             pred_high = last_df_bar['close'] * (1 + last_model_pred[0])
             pred_low = last_df_bar['close'] * (1 + last_model_pred[1])
@@ -201,7 +241,8 @@ def backtest_realtime_lstm(
                         pnl_detail = f"({prev_take_profit_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                         log_detailed(
                             curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                            "exit", entry_price, prev_take_profit_price, current_stop_loss, "take_profit", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                            "exit", entry_price, prev_take_profit_price, current_stop_loss, "take_profit", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail,
+                            ma30, diff_ma30, ma10, diff_ma10, rsi, bb_upper, bb_middle, bb_lower
                         )
                         position = 0
                         bars_held = 0
@@ -232,7 +273,8 @@ def backtest_realtime_lstm(
                         pnl_detail = f"({curr_close:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                         log_detailed(
                             curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                            "exit", entry_price, prev_take_profit_price, current_stop_loss, "max_hold", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                            "exit", entry_price, prev_take_profit_price, current_stop_loss, "max_hold", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail,
+                            ma30, diff_ma30, ma10, diff_ma10, rsi, bb_upper, bb_middle, bb_lower
                         )
                         position = 0
                         bars_held = 0
@@ -256,7 +298,8 @@ def backtest_realtime_lstm(
                         pnl_detail = f"({exit_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                         log_detailed(
                             curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                            "exit", entry_price, prev_take_profit_price, current_stop_loss, "both_penetrate", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                            "exit", entry_price, prev_take_profit_price, current_stop_loss, "both_penetrate", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail,
+                            ma30, diff_ma30, ma10, diff_ma10, rsi, bb_upper, bb_middle, bb_lower
                         )
                         position = 0
                         bars_held = 0
@@ -281,7 +324,8 @@ def backtest_realtime_lstm(
                         log_trade(entry_date, entry_price, curr_date, exit_price, pnl, "stop_loss")
                         log_detailed(
                             curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                            "exit", entry_price, prev_take_profit_price, exit_price, "stop_loss", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                            "exit", entry_price, prev_take_profit_price, exit_price, "stop_loss", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail,
+                            ma30, diff_ma30, ma10, diff_ma10, rsi, bb_upper, bb_middle, bb_lower
                         )
                         position = 0
                         bars_held = 0
@@ -304,7 +348,8 @@ def backtest_realtime_lstm(
                         pnl_detail = f"({prev_take_profit_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
                         log_detailed(
                             curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                            "exit", entry_price, prev_take_profit_price, current_stop_loss, "take_profit", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                            "exit", entry_price, prev_take_profit_price, current_stop_loss, "take_profit", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail,
+                            ma30, diff_ma30, ma10, diff_ma10, rsi, bb_upper, bb_middle, bb_lower
                         )
                         position = 0
                         bars_held = 0
@@ -334,17 +379,20 @@ def backtest_realtime_lstm(
                     prev_stop_loss_price = stop_loss_price
                     log_detailed(
                         curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                        "entry", entry_price, entry_take_profit, entry_stop_loss, "", 0, 0, ""
+                        "entry", entry_price, entry_take_profit, entry_stop_loss, "", 0, 0, "",
+                        ma30, diff_ma30, ma10, diff_ma10, rsi, bb_upper, bb_middle, bb_lower
                     )
                 else:
                     log_detailed(
                         curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                        "skip_entry", curr_close, take_profit_price, stop_loss_price, "invalid_tp_sl", 0, 0, ""
+                        "skip_entry", curr_close, take_profit_price, stop_loss_price, "invalid_tp_sl", 0, 0, "",
+                        ma30, diff_ma30, ma10, diff_ma10, rsi, bb_upper, bb_middle, bb_lower
                     )
             elif position == 1 and not exited_this_bar:
                 log_detailed(
                     curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
-                    "holding", entry_price, prev_take_profit_price, current_stop_loss, "", 0, 0, f"bars_held={bars_held}"
+                    "holding", entry_price, prev_take_profit_price, current_stop_loss, "", 0, 0, f"bars_held={bars_held}",
+                    ma30, diff_ma30, ma10, diff_ma10, rsi, bb_upper, bb_middle, bb_lower
                 )
 
             equity.append(last_equity)
@@ -357,9 +405,25 @@ def backtest_realtime_lstm(
         equity.append(last_equity)
         log_trade(entry_date, entry_price, equity_dates[-1], close_prices[-1], pnl, "final_close")
         pnl_detail = f"({close_prices[-1]:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
+        # For the final close, get indicators from the last fine_df row
+        last_idx = fine_df.index.get_loc(equity_dates[-1]) if equity_dates[-1] in fine_df.index else -1
+        if last_idx != -1:
+            last_row = fine_df.iloc[last_idx]
+            ma30 = last_row.get('ma30', None)
+            diff_ma30 = last_row.get('diff_ma30', None)
+            ma10 = last_row.get('ma10', None)
+            diff_ma10 = last_row.get('diff_ma10', None)
+            rsi = last_row.get('rsi', None)
+            bb_upper = last_row.get('bb_upper', None)
+            bb_middle = last_row.get('bb_middle', None)
+            bb_lower = last_row.get('bb_lower', None)
+        else:
+            ma30 = diff_ma30 = ma10 = diff_ma10 = rsi = bb_upper = bb_middle = bb_lower = None
+
         log_detailed(
             equity_dates[-1], open_prices[-1], high_prices[-1], low_prices[-1], close_prices[-1], volumes[-1],
-            "exit", entry_price, entry_take_profit, entry_stop_loss, "final_close", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+            "exit", entry_price, entry_take_profit, entry_stop_loss, "final_close", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail,
+            ma30, diff_ma30, ma10, diff_ma10, rsi, bb_upper, bb_middle, bb_lower
         )
     else:
         equity.append(last_equity)
@@ -369,7 +433,8 @@ def backtest_realtime_lstm(
         log_filename = f"data/lstm_backtest_realtime_log_{timestamp}.csv"
         log_columns = [
             'datetime', 'open', 'high', 'low', 'close', 'volume',
-            'state', 'entry_price', 'take_profit', 'stop_loss', 'exit_method', 'pnl', 'abs_pnl', 'pnl_detail'
+            'state', 'entry_price', 'take_profit', 'stop_loss', 'exit_method', 'pnl', 'abs_pnl', 'pnl_detail',
+            'ma30', 'diff_ma30', 'ma10', 'diff_ma10', 'rsi', 'bb_upper', 'bb_middle', 'bb_lower'
         ]
         with open(log_filename, 'w', newline='') as csvfile:
             import csv
