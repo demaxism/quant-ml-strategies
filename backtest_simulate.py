@@ -181,10 +181,32 @@ def backtest_realtime_lstm(
                 bars_held += 1
 
                 # Always update prev_take_profit_price and prev_stop_loss_price for use in the next bar
-                if bars_held == 1:
-                    prev_take_profit_price = take_profit_price
-                    prev_stop_loss_price = stop_loss_price
-                elif bars_held == 2:
+                if bars_held >= 1 and bars_held <= 2:
+                    # Take profit hit
+                    if curr_high >= prev_take_profit_price:
+                        if curr_open > prev_take_profit_price:
+                            exit_price = curr_open
+                            pnl_detail = f"({curr_open:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
+                        else:
+                            exit_price = prev_take_profit_price
+                            pnl_detail = f"({prev_take_profit_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
+                        pnl = (exit_price - entry_price) / entry_price
+                        pnl = -pnl if REVERT_PROFIT else pnl
+                        last_equity = last_equity * (1 + pnl)
+                        log_trade(entry_date, entry_price, curr_date, prev_take_profit_price, pnl, "take_profit")
+                        pnl_detail = f"({prev_take_profit_price:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
+                        log_detailed(
+                            curr_date, curr_open, curr_high, curr_low, curr_close, curr_volume,
+                            "exit", entry_price, prev_take_profit_price, current_stop_loss, "take_profit", pnl, last_equity - (last_equity / (1 + pnl)), pnl_detail
+                        )
+                        position = 0
+                        bars_held = 0
+                        exited_this_bar = True
+                        current_stop_loss = None
+                        prev_take_profit_price = None
+                        prev_stop_loss_price = None
+
+                    # For the first two bars, we set TP/SL directly from the prediction
                     prev_take_profit_price = take_profit_price
                     prev_stop_loss_price = stop_loss_price
                 else:
@@ -197,6 +219,7 @@ def backtest_realtime_lstm(
                     # Always update take profit price per bar
                     prev_take_profit_price = take_profit_price
 
+                    # Max hold condition
                     if bars_held >= N_HOLD * bars_per_df:
                         pnl = (curr_close - entry_price) / entry_price
                         pnl = -pnl if REVERT_PROFIT else pnl
@@ -214,6 +237,7 @@ def backtest_realtime_lstm(
                         prev_take_profit_price = None
                         prev_stop_loss_price = None
                     elif curr_high >= prev_take_profit_price and curr_low <= current_stop_loss:
+                        # Both TP and SL penetrated
                         mid = (curr_high + curr_low) / 2
                         dist_to_tp = abs(prev_take_profit_price - mid)
                         dist_to_sl = abs(current_stop_loss - mid)
@@ -237,9 +261,11 @@ def backtest_realtime_lstm(
                         prev_take_profit_price = None
                         prev_stop_loss_price = None
                     elif curr_low <= current_stop_loss:
+                        # Stop loss hit
                         if curr_open > current_stop_loss:
                             exit_price = current_stop_loss
                         else:
+                            # If open is below stop loss, wait for it hitting stop loss to exit, otherwise exit at close
                             if curr_high >= current_stop_loss:
                                 exit_price = current_stop_loss
                             else:
@@ -260,6 +286,7 @@ def backtest_realtime_lstm(
                         prev_take_profit_price = None
                         prev_stop_loss_price = None
                     elif curr_high >= prev_take_profit_price:
+                        # Take profit hit
                         if curr_open > prev_take_profit_price:
                             exit_price = curr_open
                             pnl_detail = f"({curr_open:.6f} - {entry_price:.6f}) / {entry_price:.6f}"
