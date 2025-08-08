@@ -44,7 +44,7 @@ def main():
                         help='Number of past candles to use for prediction')
     parser.add_argument('--predict_ahead', type=int, default=2,
                         help='Number of bars ahead to predict (N bar after the sequence)')
-    parser.add_argument('--model_file', type=str, default='lstm_model.pth',
+    parser.add_argument('--model_file', type=str, default=None,
                         help='Path to save/load the LSTM model weights')
     parser.add_argument('--n_hold', type=int, default=5,
                         help='Number of bars to hold after entry (default: 5)')
@@ -62,8 +62,8 @@ def main():
     PREDICT_AHEAD = args.predict_ahead
     N_HOLD = args.n_hold
     model_file = args.model_file
-    no_train = True if len(model_file) < 2 else False
-    N_TURN = args.n_turn    
+    no_train = model_file is not None
+    N_TURN = args.n_turn
     REVERT_PROFIT = args.revert_profit
     WRITE_CSV = args.csv  # Enable CSV logging if --csv is set
     # choose to plot first or last N predictions
