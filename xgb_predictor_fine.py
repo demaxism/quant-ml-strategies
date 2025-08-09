@@ -66,14 +66,15 @@ ADVANCED_FEATURES = False  # True: 启用技术指标和K线形态特征；False
 BET_PROB_THRESHOLD = 0.8   # 下注概率阈值（如0.7表示预测概率大于70%才下注）
 RISE_THRESHOLD = 0.01       # 目标变量上涨幅度阈值（如0.01表示1%，可调为0.005等）
 FALL_THRESHOLD = -1       # 目标变量下跌幅度阈值（如-0.01表示-1%） 越大越好
-FUTURE_K_NUM = 4            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
-LOOKBACK_WINDOW = 4         # 用于特征提取的历史K线数量（如4表示用过去4根K线的特征，可调为3、5等）
+FUTURE_K_NUM = 12            # 目标变量观察的未来K线数量（如4表示未来4根K线，可调为3、5等）
+LOOKBACK_WINDOW = 20         # 用于特征提取的历史K线数量（如4表示用过去4根K线的特征，可调为3、5等）
 TAKE_PROFIT = RISE_THRESHOLD  # 止盈百分比，默认与RISE_THRESHOLD一致
 STOP_LOSS = -0.01             # 止损百分比（如-0.01表示-1%止损）
 CRYPOTO_CURRENCY = "ETH"  # 可选：指定加密货币（如 "BTC", "ETH", "XRP" 等）
 DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-4h.feather"  # 输入数据文件，可选如 "data/ETH_USDT-4h.feather"
 SUB_DATA_FILE = f"data/{CRYPOTO_CURRENCY}_USDT-1h.feather" 
 trade_pair = DATA_FILE.split('/')[-1].split('-')[0]  # 提取交易对名称，如 "LTC_USDT"
+OUTPUT_DIR = "data/log_xgb"  # 输出目录
 
 
 def load_data(file_path):
@@ -138,84 +139,38 @@ def add_features(df, lookback_window=LOOKBACK_WINDOW, bonus=False, advanced=True
     future_k: 目标变量观察的未来K线数量（如4表示未来4根K线）
     """
     df = df.copy()
-    if advanced:
-        # 计算技术指标
-        df['rsi'] = calc_rsi(df['close'])
-        macd, macd_signal, macd_hist = calc_macd(df['close'])
-        df['macd'] = macd
-        df['macd_signal'] = macd_signal
-        df['macd_hist'] = macd_hist
-        k, d, j = calc_kdj(df)
-        df['kdj_k'] = k
-        df['kdj_d'] = d
-        df['kdj_j'] = j
-
-    feats = []
+    feature_cols = ['open', 'high', 'low', 'close', 'volume']
+    feat_dfs = []
     col_names = []
-    for i in range(lookback_window, len(df)-future_k):
-        feat = []
-        for j in range(lookback_window):
-            k_idx = i - lookback_window + j
-            # OHLCV
-            for col in ['open', 'high', 'low', 'close', 'volume']:
-                feat.append(df.iloc[k_idx][col])
-                if i == lookback_window:
-                    col_names.append(f'{col}_t-{lookback_window-j}')
-            if advanced:
-                # 技术指标
-                for col in ['rsi', 'macd', 'macd_signal', 'macd_hist', 'kdj_k', 'kdj_d', 'kdj_j']:
-                    feat.append(df.iloc[k_idx][col])
-                    if i == lookback_window:
-                        col_names.append(f'{col}_t-{lookback_window-j}')
-                # K线形态特征
-                open_ = df.iloc[k_idx]['open']
-                high_ = df.iloc[k_idx]['high']
-                low_ = df.iloc[k_idx]['low']
-                close_ = df.iloc[k_idx]['close']
-                # 阳线/阴线
-                feat.append(is_bullish(open_, close_))
-                if i == lookback_window:
-                    col_names.append(f'is_bullish_t-{lookback_window-j}')
-                # 锤头
-                feat.append(is_hammer(open_, high_, low_, close_))
-                if i == lookback_window:
-                    col_names.append(f'is_hammer_t-{lookback_window-j}')
-                # 实体长度
-                body = abs(close_ - open_)
-                feat.append(body)
-                if i == lookback_window:
-                    col_names.append(f'body_t-{lookback_window-j}')
-                # 上影线比例
-                upper = (high_ - max(open_, close_)) / (high_ - low_ + 1e-8)
-                feat.append(upper)
-                if i == lookback_window:
-                    col_names.append(f'upper_shadow_t-{lookback_window-j}')
-                # 下影线比例
-                lower = (min(open_, close_) - low_) / (high_ - low_ + 1e-8)
-                feat.append(lower)
-                if i == lookback_window:
-                    col_names.append(f'lower_shadow_t-{lookback_window-j}')
-            if bonus:
-                open_ = df.iloc[k_idx]['open']
-                close_ = df.iloc[k_idx]['close']
-                # 涨跌幅
-                ret = (close_ - open_) / (open_ + 1e-8)
-                feat.append(ret)
-                if i == lookback_window:
-                    col_names.append(f'ret_t-{lookback_window-j}')
-        feats.append(feat)
-    X = np.array(feats)
-    # 目标变量
-    y = []
-    for i in range(lookback_window, len(df)-future_k):
-        cur_close = df.iloc[i]['close']
-        future_high = df.iloc[i+1:i+1+future_k]['high'].max()
-        future_low = df.iloc[i+1:i+1+future_k]['low'].min()
-        rise = (future_high - cur_close) / cur_close
-        drawdown = (future_low - cur_close) / cur_close
-        label = 1 if (rise >= rise_threshold and drawdown >= FALL_THRESHOLD) else 0
-        y.append(label)
-    y = np.array(y)
+
+    # Vectorized lag features
+    for lag in range(lookback_window, 0, -1):
+        lagged = df[feature_cols].shift(lookback_window - lag)
+        lagged.columns = [f"{col}_t-{lag}" for col in feature_cols]
+        feat_dfs.append(lagged)
+        col_names.extend(lagged.columns.tolist())
+        if bonus:
+            ret = (df['close'].shift(lookback_window - lag) - df['open'].shift(lookback_window - lag)) / (df['open'].shift(lookback_window - lag) + 1e-8)
+            ret_name = f"ret_t-{lag}"
+            feat_dfs.append(pd.DataFrame({ret_name: ret}))
+            col_names.append(ret_name)
+
+    # Concatenate all features
+    feats_df = pd.concat(feat_dfs, axis=1)
+    # Drop rows with NaN (first lookback_window rows and last future_k rows)
+    feats_df = feats_df.iloc[lookback_window:len(df)-future_k].reset_index(drop=True)
+
+    # Target variable (vectorized)
+    cur_close = df['close'].iloc[lookback_window:len(df)-future_k].reset_index(drop=True)
+    future_high = df['high'].rolling(window=future_k, min_periods=future_k).max().shift(-future_k+1)
+    future_low = df['low'].rolling(window=future_k, min_periods=future_k).min().shift(-future_k+1)
+    future_high = future_high.iloc[lookback_window:len(df)-future_k].reset_index(drop=True)
+    future_low = future_low.iloc[lookback_window:len(df)-future_k].reset_index(drop=True)
+    rise = (future_high - cur_close) / cur_close
+    drawdown = (future_low - cur_close) / cur_close
+    y = ((rise >= rise_threshold) & (drawdown >= FALL_THRESHOLD)).astype(int).values
+
+    X = feats_df.values
     return X, y, col_names
 
 def train_xgb(X_train, y_train, X_test, y_test):
@@ -286,29 +241,37 @@ def backtest(model, X_test, y_test, df_test=None, prob_thres=0.7, take_profit=TA
             low = df_test.iloc[idx + k]['low']
             tp_price = open_price * (1 + take_profit)
             sl_price = open_price * (1 + stop_loss)
-            # 同时穿越止盈止损，按当前K线open价到止盈止损点的距离分配概率
+            
             if high >= tp_price and low <= sl_price:
+                
                 cur_open = df_test.iloc[idx + k]['open']
-                d_tp = abs(tp_price - cur_open)
-                d_sl = abs(sl_price - cur_open)
-                total = d_tp + d_sl
-                if total == 0:
-                    p_tp = 0.5
-                else:
-                    p_tp = d_sl / total
-                if random.random() < p_tp:
-                    pnl = take_profit
-                    close_price = open_price * (1 + pnl)
-                    result_str = "止盈(距离加权, 当前K线open)"
-                else:
-                    pnl = stop_loss
-                    close_price = open_price * (1 + pnl)
-                    result_str = "止损(距离加权, 当前K线open)"
+
+                # # 同时穿越止盈止损，按当前K线open价作为平仓价
+                close_price = cur_open
+                pnl = (close_price - open_price) / open_price
+                result_str = "同时穿越止盈止损 按当前K线open价平仓"
+
+                # # 同时穿越止盈止损，按当前K线open价到止盈止损点的距离分配概率
+                # d_tp = abs(tp_price - cur_open)
+                # d_sl = abs(sl_price - cur_open)
+                # total = d_tp + d_sl
+                # if total == 0:
+                #     p_tp = 0.5
+                # else:
+                #     p_tp = d_sl / total
+                # if random.random() < p_tp:
+                #     pnl = take_profit
+                #     close_price = open_price * (1 + pnl)
+                #     result_str = "止盈(距离加权, 当前K线open)"
+                # else:
+                #     pnl = stop_loss
+                #     close_price = open_price * (1 + pnl)
+                #     result_str = "止损(距离加权, 当前K线open)"
                 close_date = df_test.iloc[idx + k]['date']
                 hit = True
                 exit_idx = idx + k
                 log_print(f"{idx}\t{open_date}\t{close_date}\t{y_prob[idx]:.4f}\t{y_test[idx]}\t{open_price:.2f}\t{close_price:.2f}\t{pnl:.4f}\t({result_str})")
-                log_print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f}  止盈概率: {p_tp:.2f} 止损概率: {1-p_tp:.2f} 当前K线open: {cur_open:.2f}")
+                log_print(f"  预期止盈: {tp_price:.2f}  预期止损: {sl_price:.2f} 当前K线open: {cur_open:.2f}")
                 cross_count += 1
                 break
             # 止盈
@@ -381,7 +344,7 @@ def plot_shap(model, X, feature_names):
     shap_values = explainer.shap_values(X)
     shap.summary_plot(shap_values, X, feature_names=feature_names, show=False)
     plt.tight_layout()
-    plt.savefig("shap_summary.png", dpi=200)
+    plt.savefig(f"{OUTPUT_DIR}/shap_summary.png", dpi=200)
     plt.close()
     print("已保存SHAP特征重要性图：shap_summary.png")
 
@@ -397,7 +360,7 @@ def plot_bet_results(df, y_prob, bets, n_hist=4):
     plt.title("下注时机与收盘价")
     plt.legend()
     plt.tight_layout()
-    plt.savefig("bet_visualization.png", dpi=200)
+    plt.savefig(f"{OUTPUT_DIR}/bet_visualization.png", dpi=200)
     plt.close()
     print("已保存下注可视化图：bet_visualization.png")
 
@@ -426,7 +389,7 @@ def plot_equity_curve(equity, df_test, bets):
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
     plt.title(f"Backtest Equity Curve vs {trade_pair} Price")
     plt.tight_layout()
-    plt.savefig("equity_curve.png", dpi=200)
+    plt.savefig(f"{OUTPUT_DIR}/equity_curve.png", dpi=200)
     plt.close()
     print("已保存资金曲线图（含价格对比，双y轴）：equity_curve.png")
 
@@ -476,6 +439,7 @@ def main():
         df_coarse, lookback_window=LOOKBACK_WINDOW, bonus=True, advanced=ADVANCED_FEATURES,
         rise_threshold=RISE_THRESHOLD, future_k=FUTURE_K_NUM
     )
+    print(f"原粒度特征形状: {X_coarse.shape}, 标签形状: {y_coarse.shape}")
     X_train_coarse, X_test_coarse, y_train_coarse, y_test_coarse = train_test_split(
         X_coarse, y_coarse, test_size=0.2, shuffle=False
     )
@@ -501,6 +465,7 @@ def main():
         df_fine, lookback_window=LOOKBACK_WINDOW, bonus=True, advanced=ADVANCED_FEATURES,
         rise_threshold=RISE_THRESHOLD, future_k=fine_future_k
     )
+    print(f"细粒度特征形状: {X_fine.shape}, 标签形状: {y_fine.shape}")
     # 对齐细粒度特征的日期
     date_feat_fine = df_fine['date'].iloc[LOOKBACK_WINDOW:len(df_fine)-fine_future_k].reset_index(drop=True)
     test_mask_fine = (date_feat_fine >= test_start) & (date_feat_fine <= test_end)
