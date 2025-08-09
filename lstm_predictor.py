@@ -54,10 +54,12 @@ def main():
                         help='If set, all profit becomes loss and all loss becomes profit (simulate shorting)')
     parser.add_argument('--csv', action='store_true',
                         help='If set, enable CSV/Figure logging')
+    parser.add_argument('--fine_timeframe', type=str, default='1h',
+                        help='Timeframe for the fine data (e.g., 1h, 30m)')
     args = parser.parse_args()
 
     datafile = args.datafile
-    fine_datafile = datafile.replace('-4h', '-1h')  # Fine data file path
+    fine_datafile = datafile.replace('-4h', f'-{args.fine_timeframe}')  # Fine data file path
     SEQ_LEN = args.seq_len
     PREDICT_AHEAD = args.predict_ahead
     N_HOLD = args.n_hold
@@ -98,6 +100,8 @@ def main():
     print("==== Fine Data Overview ====")
     if fine_df is not None:
         print(fine_df.head())
+    else:
+        print("No fine data available.")
 
     # Normalize
     scaler = MinMaxScaler()
