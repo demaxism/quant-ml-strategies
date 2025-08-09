@@ -280,7 +280,7 @@ def main():
         if True:
             # # # Use bar-by-bar real-time backtest
             trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_realtime_lstm(
-                model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, this_timestamp, scaler, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol, fine_df=fine_df, BT_FROM=BT_FROM, BT_UNTIL=BT_UNTIL
+                model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, this_timestamp, scaler, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol, fine_df=fine_df, BT_FROM=BT_FROM, BT_UNTIL=BT_UNTIL, test_start=test_start
             )
         else:
             trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_long_only_strategy(

@@ -15,7 +15,7 @@ START_SHIFT = 0
 # BT_UNTIL = None  # e.g., '2023-01-01', default None
 
 def backtest_realtime_lstm(
-    model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, timestamp, scaler, WRITE_CSV=False, REVERT_PROFIT=False, threshold=0.008, allowance=0.002, symbol=None, fine_df=None, BT_FROM=None, BT_UNTIL=None
+    model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, timestamp, scaler, WRITE_CSV=False, REVERT_PROFIT=False, threshold=0.008, allowance=0.002, symbol=None, fine_df=None, BT_FROM=None, BT_UNTIL=None, test_start=None
 ):
     """
     Simulate real-time trading: for each new fine_df bar, update position and equity.
@@ -74,8 +74,9 @@ def backtest_realtime_lstm(
 
     # Prepare test data
     # Determine test_start based on BT_FROM
-    if BT_FROM is not None:
-        loc = fine_df.index.get_loc(BT_FROM)
+    _test_start = BT_FROM if BT_FROM is not None else test_start
+    if _test_start is not None:
+        loc = fine_df.index.get_loc(_test_start)
         if isinstance(loc, slice):
             test_start = loc.start
         elif isinstance(loc, (np.integer, int)):
@@ -83,7 +84,7 @@ def backtest_realtime_lstm(
         else:
             raise ValueError(f"Unexpected result from fine_df.index.get_loc(BT_FROM): {loc}")
     else:
-        test_start = split * bars_per_df  # start at the corresponding fine_df index
+        raise ValueError(f"No valid test_start provided. Please set BT_FROM or test_start.")
     test_start += START_SHIFT  # apply the start shift
     test_end = len(fine_df) - PREDICT_AHEAD * bars_per_df  # enough fine bars for SEQ_LEN+PREDICT_AHEAD df bars
 
