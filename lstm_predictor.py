@@ -60,6 +60,8 @@ def main():
                         help='If set, enable CSV/Figure logging')
     parser.add_argument('--fine_timeframe', type=str, default='1h',
                         help='Timeframe for the fine data (e.g., 1h, 30m)')
+    parser.add_argument('--entry_threshold', type=float, default=0.01,
+                        help='Minimum predicted high raise to consider for entry (default: 0.01)')
     args = parser.parse_args()
 
     datafile = args.datafile
@@ -78,6 +80,7 @@ def main():
     LAYERS = 2  # Number of LSTM layers
     BT_FROM = args.bt_from
     BT_UNTIL = args.bt_until
+    threshold = args.entry_threshold  # Minimum predicted high raise to consider for entry
 
     if not os.path.exists(datafile):
         raise FileNotFoundError(f"Data file not found: {datafile}")
@@ -276,7 +279,6 @@ def main():
             plt.savefig(f"data/log/lstm_predictions_{symbol}_{timeframe}_turn{turn_idx+1}.png")
 
         # === Long-only Trading Strategy Backtest ===
-        threshold = float(os.environ.get('LSTM_STRATEGY_THRESHOLD', 0.01))
         if True:
             # # # Use bar-by-bar real-time backtest
             trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_realtime_lstm(
