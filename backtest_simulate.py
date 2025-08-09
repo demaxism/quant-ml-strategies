@@ -11,11 +11,11 @@ START_SHIFT = 0
 # === Backtest date range control ===
 # Set BT_FROM and BT_UNTIL to limit the backtest to a specific date range in fine_df.
 # Use None to disable either bound. Format should match fine_df's index (e.g., '2022-01-01' or pd.Timestamp).
-BT_FROM = None   # e.g., '2022-01-01'
-BT_UNTIL = None  # e.g., '2023-01-01'
+# BT_FROM = '2025-03-01'   # e.g., '2022-01-01', default None
+# BT_UNTIL = None  # e.g., '2023-01-01', default None
 
 def backtest_realtime_lstm(
-    model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, timestamp, scaler, WRITE_CSV=False, REVERT_PROFIT=False, threshold=0.008, allowance=0.002, symbol=None, fine_df=None
+    model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, timestamp, scaler, WRITE_CSV=False, REVERT_PROFIT=False, threshold=0.008, allowance=0.002, symbol=None, fine_df=None, BT_FROM=None, BT_UNTIL=None
 ):
     """
     Simulate real-time trading: for each new fine_df bar, update position and equity.
@@ -37,7 +37,6 @@ def backtest_realtime_lstm(
         raise ValueError("fine_df must be provided for fine-grained backtest.")
 
     # === Filter fine_df by BT_FROM and BT_UNTIL if set ===
-    global BT_FROM, BT_UNTIL
     if BT_FROM is not None and BT_UNTIL is not None:
         fine_df = fine_df.loc[BT_FROM:BT_UNTIL].copy()
     elif BT_FROM is not None:
@@ -469,7 +468,7 @@ def backtest_realtime_lstm(
 
     # Write detailed log to CSV
     if WRITE_CSV:
-        log_filename = f"data/lstm_backtest_realtime_log_{timestamp}.csv"
+        log_filename = f"data/log/lstm_backtest_realtime_log_{timestamp}.csv"
         log_columns = [
             'datetime', 'open', 'high', 'low', 'close', 'volume',
             'state', 'entry_price', 'take_profit', 'stop_loss', 'exit_method', 'pnl', 'abs_pnl', 'pnl_detail',
@@ -518,6 +517,6 @@ def backtest_realtime_lstm(
         ax1.legend(lines, labels, loc='upper left')
 
         plt.tight_layout()
-        plt.savefig(f"data/lstm_equity_curve_realtime_{symbol}_{timestamp}.png")
+        plt.savefig(f"data/log/lstm_equity_curve_realtime_{symbol}_{timestamp}.png")
 
     return trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown

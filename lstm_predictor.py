@@ -40,6 +40,10 @@ def main():
     parser = argparse.ArgumentParser(description="Generic LSTM price predictor")
     parser.add_argument('--datafile', type=str, default='data/ETH_USDT-1h.feather',
                         help='Path to input feather file (e.g., data/ETH_USDT-4h.feather)')
+    parser.add_argument('--bt_from', type=str, default=None,
+                        help='Backtest start date (e.g., 2025-03-01)')
+    parser.add_argument('--bt_until', type=str, default=None,
+                        help='Backtest end date (e.g., 2025-03-01)')
     parser.add_argument('--seq_len', type=int, default=12,
                         help='Number of past candles to use for prediction')
     parser.add_argument('--predict_ahead', type=int, default=2,
@@ -72,6 +76,8 @@ def main():
     plot_first = None  # Default to plot first 100 predictions
     plot_last = 500  # Default to plot last 100 predictions
     LAYERS = 2  # Number of LSTM layers
+    BT_FROM = args.bt_from
+    BT_UNTIL = args.bt_until
 
     if not os.path.exists(datafile):
         raise FileNotFoundError(f"Data file not found: {datafile}")
@@ -193,7 +199,7 @@ def main():
                         break
 
             this_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_turn{turn_idx+1}"
-            this_model_file = f"data/model_{symbol}_Ly{LAYERS}_Sq{SEQ_LEN}_Ah{PREDICT_AHEAD}_{this_timestamp}.pt"
+            this_model_file = f"data/log/model_{symbol}_Ly{LAYERS}_Sq{SEQ_LEN}_Ah{PREDICT_AHEAD}_{this_timestamp}.pt"
             torch.save(model.state_dict(), this_model_file)
             print(f"Saved trained model weights to {this_model_file}.")
         else:
@@ -267,14 +273,14 @@ def main():
             plt.xticks(rotation=45)
             plt.grid(True)
             plt.tight_layout()
-            plt.savefig(f"data/lstm_predictions_{symbol}_{timeframe}_turn{turn_idx+1}.png")
+            plt.savefig(f"data/log/lstm_predictions_{symbol}_{timeframe}_turn{turn_idx+1}.png")
 
         # === Long-only Trading Strategy Backtest ===
         threshold = float(os.environ.get('LSTM_STRATEGY_THRESHOLD', 0.01))
         if True:
             # # # Use bar-by-bar real-time backtest
             trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_realtime_lstm(
-                model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, this_timestamp, scaler, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol, fine_df=fine_df
+                model, df, split, SEQ_LEN, PREDICT_AHEAD, N_HOLD, this_timestamp, scaler, WRITE_CSV, REVERT_PROFIT, threshold, symbol=symbol, fine_df=fine_df, BT_FROM=BT_FROM, BT_UNTIL=BT_UNTIL
             )
         else:
             trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_long_only_strategy(
