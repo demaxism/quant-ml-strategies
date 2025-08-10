@@ -252,7 +252,7 @@ def backtest_realtime_lstm(
 
             exited_this_bar = False
             take_profit_price = pred_high - curr_close * allowance
-            stop_loss_price = min(pred_low - curr_close * allowance, curr_close - (take_profit_price - curr_close) * 0.5) # Ensure stop loss is below current close
+            stop_loss_price = curr_close - (take_profit_price - curr_close)  # mirror the TP-CL distance
 
             # For plotting/stats
             equity_dates.append(curr_date)
@@ -300,6 +300,8 @@ def backtest_realtime_lstm(
                     if current_stop_loss is None:
                         current_stop_loss = prev_stop_loss_price
                     else:
+                        # prev_stop_loss_price: updated every bar
+                        # current_stop_loss: tracking the trailing stop loss (can only go up), will be used for checking exit conditions
                         if prev_stop_loss_price > current_stop_loss:
                             current_stop_loss = prev_stop_loss_price
 
@@ -408,8 +410,8 @@ def backtest_realtime_lstm(
                     prev_stop_loss_price = None
 
             # Entry logic: only if not in position and did not just exit
-            if position == 0 and not exited_this_bar and take_profit_price > curr_close * (1 + threshold) and is_boundary:
-                if stop_loss_price < curr_close:
+            if position == 0 and not exited_this_bar and is_boundary:
+                if stop_loss_price < curr_close and take_profit_price > curr_close * (1 + threshold) :
                     position = 1
                     entry_price = curr_close
                     entry_date = curr_date
