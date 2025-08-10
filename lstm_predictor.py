@@ -78,7 +78,7 @@ def main():
     LAYERS = 2  # Number of LSTM layers
     BT_FROM = args.bt_from
     BT_UNTIL = args.bt_until
-    threshold = 0.01 # Default threshold for entry logic
+    threshold = 0.016 # Default threshold for entry logic
 
     if not os.path.exists(datafile):
         raise FileNotFoundError(f"Data file not found: {datafile}")
