@@ -62,6 +62,8 @@ def main():
                         help='Timeframe for the fine data (e.g., 1h, 30m)')
     parser.add_argument('--entry_threshold', type=float, default=0.01,
                         help='Threshold for entry logic (default: 0.01)')
+    parser.add_argument('--train_start_date', type=str, default=None,
+                        help='Training start date in yyyy-mm-dd format (e.g., 2022-01-01)')
     args = parser.parse_args()
 
     datafile = args.datafile
@@ -93,6 +95,11 @@ def main():
     df['change'] = df['close'].pct_change().fillna(0)
     df['date'] = pd.to_datetime(df['date'])
     df.set_index('date', inplace=True)
+
+    # Filter training start date if specified
+    if args.train_start_date is not None:
+        train_start_dt = pd.to_datetime(args.train_start_date).tz_localize(df.index.tz)
+        df = df[df.index >= train_start_dt]
 
     # Load fine data if available
     fine_df = None
@@ -159,6 +166,7 @@ def main():
     test_end = df.index[SEQ_LEN + split + len(X_test) - 1]
     print(f"Training set time range: {train_start} to {train_end}")
     print(f"Backtest (test) set time range: {test_start} to {test_end}")
+    print(f"Price from {df.loc[test_start]['close']} to {df.loc[test_end]['close']}")
     print(f"manual backtest start: {BT_FROM}, end: {BT_UNTIL}")
 
     # Dataset
