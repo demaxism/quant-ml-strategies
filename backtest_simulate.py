@@ -251,8 +251,8 @@ def backtest_realtime_lstm(
             pred_low = last_df_bar['close'] * (1 + last_model_pred[1])
 
             exited_this_bar = False
-            take_profit_price = pred_high * (1 - allowance)
-            stop_loss_price = pred_low * (1 + allowance)
+            take_profit_price = pred_high - curr_close * allowance
+            stop_loss_price = min(pred_low - curr_close * allowance, curr_close - (take_profit_price - curr_close) * 0.5) # Ensure stop loss is below current close
 
             # For plotting/stats
             equity_dates.append(curr_date)
@@ -408,8 +408,8 @@ def backtest_realtime_lstm(
                     prev_stop_loss_price = None
 
             # Entry logic: only if not in position and did not just exit
-            if position == 0 and not exited_this_bar and pred_high > curr_close * (1 + threshold) and is_boundary:
-                if (take_profit_price > curr_close) and (stop_loss_price < curr_close):
+            if position == 0 and not exited_this_bar and take_profit_price > curr_close * (1 + threshold) and is_boundary:
+                if stop_loss_price < curr_close:
                     position = 1
                     entry_price = curr_close
                     entry_date = curr_date
