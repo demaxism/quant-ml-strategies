@@ -60,8 +60,6 @@ def main():
                         help='If set, enable CSV/Figure logging')
     parser.add_argument('--fine_timeframe', type=str, default='1h',
                         help='Timeframe for the fine data (e.g., 1h, 30m)')
-    parser.add_argument('--entry_threshold', type=float, default=0.01,
-                        help='Minimum predicted high raise to consider for entry (default: 0.01)')
     args = parser.parse_args()
 
     datafile = args.datafile
@@ -80,7 +78,7 @@ def main():
     LAYERS = 2  # Number of LSTM layers
     BT_FROM = args.bt_from
     BT_UNTIL = args.bt_until
-    threshold = args.entry_threshold  # Minimum predicted high raise to consider for entry
+    threshold = 0.01 # Default threshold for entry logic
 
     if not os.path.exists(datafile):
         raise FileNotFoundError(f"Data file not found: {datafile}")
@@ -103,14 +101,28 @@ def main():
         fine_df['date'] = pd.to_datetime(fine_df['date'])
         fine_df.set_index('date', inplace=True)
 
-    print('start analyze')
-    print("==== Data Overview ====")
-    print(df.head())
-    print("==== Fine Data Overview ====")
-    if fine_df is not None:
-        print(fine_df.head())
-    else:
-        print("No fine data available.")
+    # print('start analyze')
+    # print("==== Data Overview ====")
+    # print(df.head())
+    # print("==== Fine Data Overview ====")
+    # if fine_df is not None:
+    #     print(fine_df.head())
+    # else:
+    #     print("No fine data available.")
+
+    # print current timestamp
+    print(f"Current timestamp: {timestamp}")
+
+    # print current git repo branch and commit
+    try:
+        import subprocess
+        branch = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD']).strip().decode('utf-8')
+        commit = subprocess.check_output(['git', 'rev-parse', 'HEAD']).strip().decode('utf-8')
+        print(f"Current Git branch: {branch}")
+        print(f"Current Git commit: {commit}")
+    except Exception as e:
+        print(f"Error getting Git info: {e}")
+        branch, commit = "unknown", "unknown"
 
     # Normalize
     scaler = MinMaxScaler()
@@ -145,6 +157,7 @@ def main():
     test_end = df.index[SEQ_LEN + split + len(X_test) - 1]
     print(f"Training set time range: {train_start} to {train_end}")
     print(f"Backtest (test) set time range: {test_start} to {test_end}")
+    print(f"manual backtest start: {BT_FROM}, end: {BT_UNTIL}")
 
     # Dataset
     class PriceDataset(Dataset):
@@ -241,28 +254,24 @@ def main():
         # Step 1: Get full index of original data
         date_index = df.index[SEQ_LEN + split:]  # fixed: removed +1 to match X_test length
 
-        # Step 2: Select the plotting range based on user input
-        if plot_first is not None and plot_last is not None:
-            raise ValueError("Only one of --plot_first or --plot_last can be set.")
-        if plot_first is not None:
-            plot_dates = date_index[:plot_first]
-            true_plot = true[:plot_first]
-            predicted_plot = predicted[:plot_first]
-        elif plot_last is not None:
-            plot_dates = date_index[-plot_last:]
-            true_plot = true[-plot_last:]
-            predicted_plot = predicted[-plot_last:]
-        else:
-            plot_dates = date_index[:100]
-            true_plot = true[:100]
-            predicted_plot = predicted[:100]
-
-        # Print chart start date
-        if len(plot_dates) > 0:
-            print("Chart start date:", plot_dates[0].strftime('%Y-%m-%d'))
-
-        # Step 3: Plot with datetime x-axis
         if WRITE_CSV:
+            # Step 2: Select the plotting range based on user input
+            if plot_first is not None and plot_last is not None:
+                raise ValueError("Only one of --plot_first or --plot_last can be set.")
+            if plot_first is not None:
+                plot_dates = date_index[:plot_first]
+                true_plot = true[:plot_first]
+                predicted_plot = predicted[:plot_first]
+            elif plot_last is not None:
+                plot_dates = date_index[-plot_last:]
+                true_plot = true[-plot_last:]
+                predicted_plot = predicted[-plot_last:]
+            else:
+                plot_dates = date_index[:100]
+                true_plot = true[:100]
+                predicted_plot = predicted[:100]
+
+            # Step 3: Plot with datetime x-axis
             plt.figure(figsize=(14, 6))
             plt.plot(plot_dates, true_plot[:, 0], label="True High (reconstructed)")
             plt.plot(plot_dates, predicted_plot[:, 0], label="Pred High (reconstructed)", linestyle="--")
@@ -279,6 +288,7 @@ def main():
             plt.savefig(f"data/log/lstm_predictions_{symbol}_{timeframe}_turn{turn_idx+1}.png")
 
         # === Long-only Trading Strategy Backtest ===
+        
         if True:
             # # # Use bar-by-bar real-time backtest
             trade_log, equity, total_return, number_of_trades, win_rate, max_drawdown = backtest_realtime_lstm(
