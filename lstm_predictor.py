@@ -60,6 +60,8 @@ def main():
                         help='If set, enable CSV/Figure logging')
     parser.add_argument('--fine_timeframe', type=str, default='1h',
                         help='Timeframe for the fine data (e.g., 1h, 30m)')
+    parser.add_argument('--entry_threshold', type=float, default=0.01,
+                        help='Threshold for entry logic (default: 0.01)')
     args = parser.parse_args()
 
     datafile = args.datafile
@@ -78,7 +80,7 @@ def main():
     LAYERS = 2  # Number of LSTM layers
     BT_FROM = args.bt_from
     BT_UNTIL = args.bt_until
-    threshold = 0.016 # Default threshold for entry logic
+    threshold = args.entry_threshold
 
     if not os.path.exists(datafile):
         raise FileNotFoundError(f"Data file not found: {datafile}")
@@ -303,6 +305,7 @@ def main():
         print(f"  Number of Trades: {number_of_trades}")
         print(f"  Win Rate: {win_rate*100:.2f}%")
         print(f"  Max Drawdown: {max_drawdown*100:.2f}%")
+        print(f"  Return per Trade: {(total_return/number_of_trades*100) if number_of_trades > 0 else 0:.2f}%")
         return this_model_file, total_return, number_of_trades, win_rate, max_drawdown, high_mae, low_mae
 
     run_turns = N_TURN if not no_train else 1
@@ -315,39 +318,39 @@ def main():
             'number_of_trades': number_of_trades,
             'win_rate': win_rate,
             'max_drawdown': max_drawdown,
-            'high_mae': high_mae,
+            'return_per_trade': total_return / number_of_trades if number_of_trades > 0 else 0,
             'low_mae': low_mae
         })
 
         # Print top 3 results so far, sorted by total_return / max_drawdown
         def _sort_key(row):
-            return row['total_return'] / row['max_drawdown'] if row['max_drawdown'] != 0 else float('inf')
+            return row['return_per_trade']
         top3 = sorted(results, key=_sort_key, reverse=True)[:3]
-        print("\nTop 3 results so far (by total_return / max_drawdown):")
-        print("{:<35} {:>12} {:>15}".format("Model File", "Total Return", "Max Drawdown"))
+        print("\nTop 3 results so far (by return per trade):")
+        print("{:<35} {:>12} {:>15}".format("Model File", "Total Return", "Return/Trade"))
         for row in top3:
             print("{:<35} {:>12.2f}% {:>15.2f}%".format(
                 (os.path.basename(row['model_file']))[-20:],
                 row['total_return']*100,
-                row['max_drawdown']*100
+                row['return_per_trade']*100
             ))
 
     # Sort results by (total_return / max_drawdown) descending, using column names
     def sort_key(row):
-        return row['total_return'] / row['max_drawdown'] if row['max_drawdown'] != 0 else float('inf')
+        return row['return_per_trade']  # Sort by return per trade
     results_sorted = sorted(results, key=sort_key, reverse=True)
 
     # Print summary table
     print("\n=== Summary of All Turns ===")
-    print("{:<35} {:>12} {:>15} {:>10} {:>15} {:>10} {:>10}".format("Model File", "Total Return", "Num Trades", "Win Rate", "Max Drawdown", "High MAE", "Low MAE"))
+    print("{:<35} {:>12} {:>15} {:>10} {:>15} {:>10} {:>10}".format("Model File", "Total Return", "Num Trades", "Win Rate", "Max Drawdown", "Return/Trade", "Low MAE"))
     for row in results_sorted:
-        print("{:<35} {:>12.2f}% {:>15} {:>10.2f}% {:>15.2f}% {:>10.2f} {:>10.2f} ".format(
+        print("{:<35} {:>12.2f}% {:>15} {:>10.2f}% {:>15.2f}% {:>10.2f}% {:>10.2f} ".format(
             (os.path.basename(row['model_file']))[-20:],
             row['total_return']*100,
             row['number_of_trades'],
             row['win_rate']*100,
             row['max_drawdown']*100,
-            row['high_mae'],
+            row['return_per_trade']*100,
             row['low_mae']
         ))
     return results_sorted
