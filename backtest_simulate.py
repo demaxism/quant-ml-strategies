@@ -187,8 +187,11 @@ def backtest_realtime_lstm(
 
         fine_buffer.append(fine_row)
 
+        is_boundary = False
+
         # Check if a new df bar is complete (every bars_per_df fine bars)
         if len(fine_buffer) == bars_per_df:
+            is_boundary = True
             # Aggregate fine_buffer into a new df bar
             agg_open = fine_buffer[0]['open']
             agg_high = max(row['high'] for row in fine_buffer)
@@ -405,7 +408,7 @@ def backtest_realtime_lstm(
                     prev_stop_loss_price = None
 
             # Entry logic: only if not in position and did not just exit
-            if position == 0 and not exited_this_bar and pred_high > curr_close * (1 + threshold):
+            if position == 0 and not exited_this_bar and pred_high > curr_close * (1 + threshold) and is_boundary:
                 if (take_profit_price > curr_close) and (stop_loss_price < curr_close):
                     position = 1
                     entry_price = curr_close
