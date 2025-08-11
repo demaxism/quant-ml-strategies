@@ -23,6 +23,7 @@ import os
 from datetime import datetime
 from backtest_long_only_strategy import backtest_long_only_strategy
 from backtest_simulate import backtest_realtime_lstm
+from scale_invariant import to_scale_invariant
 
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -110,6 +111,16 @@ def main():
         fine_df['date'] = pd.to_datetime(fine_df['date'])
         fine_df.set_index('date', inplace=True)
 
+    # Determine how many fine_df bars per df bar
+    # Assume df and fine_df have the same symbol, and are continuous
+    # Use the time difference between first two rows to infer frequency
+    df_freq = (df.index[1] - df.index[0]).total_seconds()
+    fine_freq = (fine_df.index[1] - fine_df.index[0]).total_seconds()
+    bars_per_df = int(round(df_freq / fine_freq))
+
+    # ==== Build scale-invariant view ====
+    df = to_scale_invariant(df, N=200, vol_N=200)
+    fine_df = to_scale_invariant(fine_df, N=200*bars_per_df, vol_N=200*bars_per_df)
     # print('start analyze')
     # print("==== Data Overview ====")
     # print(df.head())
