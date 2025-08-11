@@ -246,9 +246,13 @@ def backtest_realtime_lstm(
             bb_middle = fine_row.get('bb_middle', None)
             bb_lower = fine_row.get('bb_lower', None)
 
-            # Reconstruct predicted high/low prices from last df bar's close
-            pred_high = last_df_bar['close'] * (1 + last_model_pred[0])
-            pred_low = last_df_bar['close'] * (1 + last_model_pred[1])
+            # Reconstruct predicted high/low prices using scaler inverse transform (as in lstm_predictor.py)
+            def inverse_high_low(vals):
+                dummy = np.zeros((len(vals), 6))
+                dummy[:, 1:3] = vals
+                return scaler.inverse_transform(dummy)[:, 1:3]
+
+            pred_high, pred_low = inverse_high_low(np.array([last_model_pred]))[0]
 
             exited_this_bar = False
             take_profit_price = pred_high - curr_close * allowance
