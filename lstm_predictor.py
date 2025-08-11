@@ -119,16 +119,14 @@ def main():
     bars_per_df = int(round(df_freq / fine_freq))
 
     # ==== Build scale-invariant view ====
-    df = to_scale_invariant(df, N=200, vol_N=200)
-    fine_df = to_scale_invariant(fine_df, N=200*bars_per_df, vol_N=200*bars_per_df)
+    df, fine_df = to_scale_invariant(df, fine_df, bars_per_df, N=200, vol_N=200)
     # print('start analyze')
     # print("==== Data Overview ====")
     # print(df.head())
     # print("==== Fine Data Overview ====")
-    # if fine_df is not None:
-    #     print(fine_df.head())
-    # else:
-    #     print("No fine data available.")
+    # print(fine_df.head())
+    # print(f"num of rows close NaN in df:  {df['close'].isna().sum()}, will trim them")
+    df = df.dropna(subset=['close'])
 
     # print current timestamp
     print(f"Current timestamp: {timestamp}")
