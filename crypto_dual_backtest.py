@@ -7,6 +7,7 @@ Usage examples:
   python3 crypto_dual_backtest.py --data BTC_USDT-1h.csv --tz UTC --strategy turtle --fee 0.0006
   python3 crypto_dual_backtest.py --data BTC_USDT-1h.feather --strategy bb_revert --initial-cash 10000
   python3 crypto_dual_backtest.py --data BTC_USDT-1h.csv --plot
+  python crypto_dual_backtest.py --data data/ETH_USDT-4h.feather --bt-from 2022-01-01 --strategy turtle --fee 0.0007 --plot
 
 Data format (CSV or Feather): must include columns:
   date, open, high, low, close, volume
@@ -288,14 +289,24 @@ def backtest_long_only(df: pd.DataFrame,
     }
     return out
 
-def plot_results(df: pd.DataFrame, result: dict, show: bool = True, save_path: str | None = None):
+def plot_results(df: pd.DataFrame, result: dict, data_name: str = "", show: bool = True, save_path: str | None = None):
     eq = result["equity_curve"]
-    plt.figure(figsize=(10,5))
-    plt.plot(eq.index, eq.values, label="Strategy Equity")
-    plt.title(f"Equity Curve - {result['strategy']}")
-    plt.xlabel("Date")
-    plt.ylabel("Equity")
-    plt.legend()
+    fig, ax1 = plt.subplots(figsize=(10,5))
+    ax1.plot(eq.index, eq.values, label="Strategy Equity", color="tab:blue")
+    ax1.set_xlabel("Date")
+    ax1.set_ylabel("Equity", color="tab:blue")
+    ax1.tick_params(axis='y', labelcolor="tab:blue")
+
+    ax2 = ax1.twinx()
+    ax2.plot(df["date"], df["close"], label="Price", color="tab:orange", alpha=0.3)
+    ax2.set_ylabel("Price", color="tab:orange")
+    ax2.tick_params(axis='y', labelcolor="tab:orange")
+
+    title = f"Equity vs Price - {result['strategy']} - {data_name}" if data_name else f"Equity vs Price - {result['strategy']}"
+    plt.title(title)
+    fig.tight_layout()
+    ax1.legend(loc="upper left")
+    ax2.legend(loc="upper right")
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")
     if show:
@@ -338,9 +349,21 @@ def main():
     ap.add_argument("--bb-length", type=int, default=20, help="BB window length")
     ap.add_argument("--bb-std", type=float, default=2.0, help="BB standard deviations")
     ap.add_argument("--risk-per-trade", type=float, default=1.0, help="Fraction of cash to allocate per entry [0-1]")
+    ap.add_argument("--bt-from", type=str, default=None, help="Backtest start date (inclusive, e.g. 2021-01-01)")
+    ap.add_argument("--bt-to", type=str, default=None, help="Backtest end date (inclusive, e.g. 2022-01-01)")
     args = ap.parse_args()
 
     df = load_ohlcv(args.data, tz=args.tz)
+
+    # Filter by backtest date range if specified
+    if args.bt_from is not None:
+        bt_from = pd.to_datetime(args.bt_from, utc=True, errors="coerce")
+        if bt_from is not pd.NaT:
+            df = df[df["date"] >= bt_from]
+    if args.bt_to is not None:
+        bt_to = pd.to_datetime(args.bt_to, utc=True, errors="coerce")
+        if bt_to is not pd.NaT:
+            df = df[df["date"] <= bt_to]
 
     if args.strategy == "turtle":
         sig = turtle_signals(df, entry_lookback=args.entry_lookback, exit_lookback=args.exit_lookback)
@@ -359,7 +382,7 @@ def main():
 
     if args.plot or args.save_chart:
         out_png = args.save_chart
-        plot_results(df, res, show=args.plot, save_path=out_png)
+        plot_results(df, res, data_name=args.data, show=args.plot, save_path=out_png)
 
 if __name__ == "__main__":
     main()
