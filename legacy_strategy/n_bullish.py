@@ -10,6 +10,7 @@ TP_PERCENT = 0.10                # 止盈 +10%
 SL_PERCENT = -0.10               # 止损 -10%
 REBOUND_LOWER = 0.93             # 反弹观察下限
 REBOUND_EXIT = 0.97              # 反弹平仓上限
+DIP_THRESHOLD_PCT = 0.01         # Percentage dip from the previous close to trigger a buy (e.g., 0.01 = 1% drop)
 
 # === 回测时间范围设置 ===
 BACKTEST_START = "2020-12-15"
@@ -64,27 +65,44 @@ trades = []
 # === 主回测循环 ===
 idx = 0
 while idx < len(df):
+    current_close = df.at[idx, 'close']
+    current_high = df.at[idx, 'high']
+    current_low = df.at[idx, 'low']
+    
+    """
+    Index:      idx-3        idx-2        idx-1        idx
+           ┌──────────┐┌──────────┐┌──────────┐┌──────────┐
+    Bar:       Bar A       Bar B       Bar C       Bar D (current)
+    'close':   A.close     B.close     C.close     D.close
+    'low':     A.low       B.low       C.low       D.low
+
+    recent = df.iloc[idx - 3 : idx]  →  [Bar A, Bar B, Bar C]   (EXCLUDES Bar D)
+    prev_close = recent.iloc[-1]['close'] → C.close             (Bar just before D)
+    current_low = df.at[idx, 'low']  →  D.low                   (Current bar's low)
+
+    """
     # --- 阶段一：观察并挂单 ---
     if observing and position is None:
         if idx >= N_BULLISH_COUNT:
             recent = df.iloc[idx - N_BULLISH_COUNT:idx]
+            prev_close = recent.iloc[-1]['close']
             if recent['is_bullish'].all():
-                buy_price = recent.iloc[-1]['close']
-                size = (cash * ORDER_SIZE_RATIO) / buy_price
-                position = {
-                    'entry_price': buy_price,
-                    'size': size,
-                    'entry_time': df.at[idx, 'date'],
-                    'in_rebound_watch': False
-                }
-                cash -= buy_price * size
-                print(f"[{df.at[idx, 'date']}] Market Buy at {buy_price:.2f}, size={size:.4f}, cash={cash:.2f}")
-                observing = False
+                dip_limit = prev_close * (1 - DIP_THRESHOLD_PCT)
+                if current_low <= dip_limit:
+                    buy_price = dip_limit
+                    size = (cash * ORDER_SIZE_RATIO) / buy_price
+                    position = {
+                        'entry_price': buy_price,
+                        'size': size,
+                        'entry_time': df.at[idx, 'date'],
+                        'in_rebound_watch': False
+                    }
+                    cash -= buy_price * size
+                    print(f"[{df.at[idx, 'date']}] Market Buy at {buy_price:.2f}, size={size:.4f}, cash={cash:.2f}")
+                    observing = False
 
     # --- 阶段三：持仓管理 ---
     elif position:
-        current_close = df.at[idx, 'close']
-        current_high = df.at[idx, 'high']
         entry_price = position['entry_price']
 
         # 止盈止损
