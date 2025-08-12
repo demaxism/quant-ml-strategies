@@ -120,10 +120,10 @@ while idx < len(df):
     # --- 阶段三：持仓管理 ---
     elif position:
         entry_price = position['entry_price']
-
-        # 止盈止损
-        if current_high >= entry_price * (1 + TP_PERCENT):
-            exit_price = current_high
+        take_profit_price = entry_price * (1 + TP_PERCENT)
+        # 止盈
+        if current_high >= take_profit_price:
+            exit_price = take_profit_price
             pnl = (exit_price - entry_price) * position['size']
             cash += exit_price * position['size']
             log_trade(f"[{df.at[idx, 'date']}] TP Hit: entry={entry_price:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
@@ -138,8 +138,9 @@ while idx < len(df):
             })
             position = None
             observing = True
+        # 反弹止盈
         elif position['in_rebound_watch'] and current_high >= entry_price * REBOUND_EXIT:
-            exit_price = current_high
+            exit_price = entry_price * REBOUND_EXIT
             pnl = (exit_price - entry_price) * position['size']
             cash += exit_price * position['size']
             log_trade(f"[{df.at[idx, 'date']}] Rebound Exit: entry={entry_price:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
@@ -154,6 +155,7 @@ while idx < len(df):
             })
             position = None
             observing = True
+        # 止损
         elif current_close <= entry_price * (1 + SL_PERCENT):
             exit_price = current_close
             pnl = (exit_price - entry_price) * position['size']
