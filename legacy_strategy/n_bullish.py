@@ -19,9 +19,15 @@ BACKTEST_END = "2024-03-01"
 parser = argparse.ArgumentParser(description='Scale-invariant transformation for price data')
 parser.add_argument('--datafile', type=str, default='data/ETH_USDT-1h.feather',
     help='Path to input feather file (e.g., data/ETH_USDT-4h.feather)')
+parser.add_argument('--bt_from', type=str, default='2020-12-15',
+    help='Backtest start date (e.g., 2025-03-01)')
+parser.add_argument('--bt_to', type=str, default='2024-03-01',
+    help='Backtest end date (e.g., 2025-03-01)')
 args = parser.parse_args()
 
 data_src = args.datafile
+BACKTEST_START = args.bt_from
+BACKTEST_END = args.bt_to
 # Get filename only: "BTC_USDT-1h.feather"
 filename = os.path.basename(data_src)
 # Extract currency pair: "BTC_USDT"
@@ -77,7 +83,7 @@ while idx < len(df):
 
     # --- 阶段三：持仓管理 ---
     elif position:
-        current_price = df.at[idx, 'close']
+        current_close = df.at[idx, 'close']
         current_high = df.at[idx, 'high']
         entry_price = position['entry_price']
 
@@ -93,12 +99,29 @@ while idx < len(df):
                 'entry_price': entry_price,
                 'exit_price': exit_price,
                 'size': position['size'],
-                'pnl': pnl
+                'pnl': pnl,
+                'memo': 'TP'
             })
             position = None
             observing = True
-        elif current_price <= entry_price * (1 + SL_PERCENT):
-            exit_price = current_price
+        elif position['in_rebound_watch'] and current_high >= entry_price * REBOUND_EXIT:
+            exit_price = current_high
+            pnl = (exit_price - entry_price) * position['size']
+            cash += exit_price * position['size']
+            print(f"[{df.at[idx, 'date']}] Rebound Exit: entry={entry_price:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
+            trades.append({
+                'entry_time': position['entry_time'],
+                'exit_time': df.at[idx, 'date'],
+                'entry_price': entry_price,
+                'exit_price': exit_price,
+                'size': position['size'],
+                'pnl': pnl,
+                'memo': 'rebound_exit'
+            })
+            position = None
+            observing = True
+        elif current_close <= entry_price * (1 + SL_PERCENT):
+            exit_price = current_close
             pnl = (exit_price - entry_price) * position['size']
             cash += exit_price * position['size']
             print(f"[{df.at[idx, 'date']}] SL Hit: entry={entry_price:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
@@ -108,30 +131,16 @@ while idx < len(df):
                 'entry_price': entry_price,
                 'exit_price': exit_price,
                 'size': position['size'],
-                'pnl': pnl
+                'pnl': pnl,
+                'memo': 'SL'
             })
             position = None
             observing = True
         else:
             # 反弹观察
-            if not position['in_rebound_watch'] and current_price <= entry_price * REBOUND_LOWER:
+            if not position['in_rebound_watch'] and current_close <= entry_price * REBOUND_LOWER:
                 position['in_rebound_watch'] = True
-                print(f"[{df.at[idx, 'date']}] Enter Rebound Watch (price={current_price:.2f})")
-            elif position['in_rebound_watch'] and current_price >= entry_price * REBOUND_EXIT:
-                exit_price = current_price
-                pnl = (exit_price - entry_price) * position['size']
-                cash += exit_price * position['size']
-                print(f"[{df.at[idx, 'date']}] Rebound Exit: entry={entry_price:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
-                trades.append({
-                    'entry_time': position['entry_time'],
-                    'exit_time': df.at[idx, 'date'],
-                    'entry_price': entry_price,
-                    'exit_price': exit_price,
-                    'size': position['size'],
-                    'pnl': pnl
-                })
-                position = None
-                observing = True
+                print(f"[{df.at[idx, 'date']}] Enter Rebound Watch (price={current_close:.2f})")
 
     idx += 1
 
@@ -147,7 +156,8 @@ if position:
         'entry_price': position['entry_price'],
         'exit_price': exit_price,
         'size': position['size'],
-        'pnl': pnl
+        'pnl': pnl,
+        'memo': 'forced_exit'
     })
     position = None
 
@@ -156,11 +166,13 @@ total_trades = len(trades)
 winning_trades = [t for t in trades if t['pnl'] > 0]
 losing_trades = [t for t in trades if t['pnl'] <= 0]
 total_pnl = sum(t['pnl'] for t in trades)
+rebound_exit = [t for t in trades if t['memo'] == 'rebound_exit']
 
 print("\n===== Summary =====")
 print(f"Total Trades       : {total_trades}")
 print(f"Winning Trades     : {len(winning_trades)}")
 print(f"Losing Trades      : {len(losing_trades)}")
+print(f"Rebound TP         : {len(rebound_exit)}")
 print(f"Total PnL (USDT)   : {total_pnl:.2f}")
 print(f"Final Cash (USDT)  : {cash:.2f}")
 
