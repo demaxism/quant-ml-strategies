@@ -11,10 +11,17 @@ SL_PERCENT = -0.10               # 止损 -10%
 REBOUND_LOWER = 0.93             # 反弹观察下限
 REBOUND_EXIT = 0.97              # 反弹平仓上限
 DIP_THRESHOLD_PCT = 0.01         # Percentage dip from the previous close to trigger a buy (e.g., 0.01 = 1% drop)
+ENABLE_DIP_ENTRY = False          # 挂低点买单入场
 
 # === 回测时间范围设置 ===
 BACKTEST_START = "2020-12-15"
 BACKTEST_END = "2024-03-01"
+
+ENABLE_LOG_TRADE = False
+
+def log_trade(str):
+    if ENABLE_LOG_TRADE:
+        print(str)
 
 # === 数据加载与预处理 ===
 parser = argparse.ArgumentParser(description='Scale-invariant transformation for price data')
@@ -87,9 +94,18 @@ while idx < len(df):
             recent = df.iloc[idx - N_BULLISH_COUNT:idx]
             prev_close = recent.iloc[-1]['close']
             if recent['is_bullish'].all():
+                buy_price = 0.0
                 dip_limit = prev_close * (1 - DIP_THRESHOLD_PCT)
-                if current_low <= dip_limit:
-                    buy_price = dip_limit
+                do_entry = False
+                if ENABLE_DIP_ENTRY:
+                    if current_low <= dip_limit:
+                        buy_price = dip_limit
+                        do_entry = True
+                else:
+                    buy_price = prev_close
+                    do_entry = True
+
+                if do_entry:
                     size = (cash * ORDER_SIZE_RATIO) / buy_price
                     position = {
                         'entry_price': buy_price,
@@ -98,7 +114,7 @@ while idx < len(df):
                         'in_rebound_watch': False
                     }
                     cash -= buy_price * size
-                    print(f"[{df.at[idx, 'date']}] Market Buy at {buy_price:.2f}, size={size:.4f}, cash={cash:.2f}")
+                    log_trade(f"[{df.at[idx, 'date']}] Market Buy at {buy_price:.2f}, size={size:.4f}, cash={cash:.2f}")
                     observing = False
 
     # --- 阶段三：持仓管理 ---
@@ -110,7 +126,7 @@ while idx < len(df):
             exit_price = current_high
             pnl = (exit_price - entry_price) * position['size']
             cash += exit_price * position['size']
-            print(f"[{df.at[idx, 'date']}] TP Hit: entry={entry_price:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
+            log_trade(f"[{df.at[idx, 'date']}] TP Hit: entry={entry_price:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
             trades.append({
                 'entry_time': position['entry_time'],
                 'exit_time': df.at[idx, 'date'],
@@ -126,7 +142,7 @@ while idx < len(df):
             exit_price = current_high
             pnl = (exit_price - entry_price) * position['size']
             cash += exit_price * position['size']
-            print(f"[{df.at[idx, 'date']}] Rebound Exit: entry={entry_price:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
+            log_trade(f"[{df.at[idx, 'date']}] Rebound Exit: entry={entry_price:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
             trades.append({
                 'entry_time': position['entry_time'],
                 'exit_time': df.at[idx, 'date'],
@@ -142,7 +158,7 @@ while idx < len(df):
             exit_price = current_close
             pnl = (exit_price - entry_price) * position['size']
             cash += exit_price * position['size']
-            print(f"[{df.at[idx, 'date']}] SL Hit: entry={entry_price:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
+            log_trade(f"[{df.at[idx, 'date']}] SL Hit: entry={entry_price:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
             trades.append({
                 'entry_time': position['entry_time'],
                 'exit_time': df.at[idx, 'date'],
@@ -158,7 +174,7 @@ while idx < len(df):
             # 反弹观察
             if not position['in_rebound_watch'] and current_close <= entry_price * REBOUND_LOWER:
                 position['in_rebound_watch'] = True
-                print(f"[{df.at[idx, 'date']}] Enter Rebound Watch (price={current_close:.2f})")
+                log_trade(f"[{df.at[idx, 'date']}] Enter Rebound Watch (price={current_close:.2f})")
 
     idx += 1
 
@@ -167,7 +183,7 @@ if position:
     exit_price = df.iloc[-1]['close']
     pnl = (exit_price - position['entry_price']) * position['size']
     cash += exit_price * position['size']
-    print(f"[{df.iloc[-1]['date']}] Forced Exit at End: entry={position['entry_price']:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
+    log_trade(f"[{df.iloc[-1]['date']}] Forced Exit at End: entry={position['entry_price']:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
     trades.append({
         'entry_time': position['entry_time'],
         'exit_time': df.iloc[-1]['date'],
@@ -186,6 +202,12 @@ losing_trades = [t for t in trades if t['pnl'] <= 0]
 total_pnl = sum(t['pnl'] for t in trades)
 rebound_exit = [t for t in trades if t['memo'] == 'rebound_exit']
 
+# --- 新增: 计算超额收益 ---
+benchmark_return = end_close / start_open
+ret = cash / 1000
+excess_ret = ret - benchmark_return
+excess_ret_per_trade = excess_ret / total_trades if total_trades > 0 else 0
+
 print("\n===== Summary =====")
 print(f"Total Trades       : {total_trades}")
 print(f"Winning Trades     : {len(winning_trades)}")
@@ -193,6 +215,10 @@ print(f"Losing Trades      : {len(losing_trades)}")
 print(f"Rebound TP         : {len(rebound_exit)}")
 print(f"Total PnL (USDT)   : {total_pnl:.2f}")
 print(f"Final Cash (USDT)  : {cash:.2f}")
+print(f"Benchmark return   : {benchmark_return:.5f}")
+print(f"ret                : {ret:.5f}")
+print(f"Excess ret         : {excess_ret:.5f}")
+print(f"Excess ret/trade   : {excess_ret_per_trade:.5f}")
 
 
 import matplotlib.pyplot as plt
