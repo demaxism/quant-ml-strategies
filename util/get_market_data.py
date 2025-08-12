@@ -49,9 +49,8 @@ def fetch_usdjpy(period="max", interval="1d", start=None, end=None):
     ticker = 'USD_JPY'
     return df, ticker
 
-def fetch_msft(period="max", interval="1d", start=None, end=None):
+def fetch_stock(ticker="MSFT", period="max", interval="1d", start=None, end=None):
     # MSFT or AMD
-    ticker = "NFLX"
     if start or end:
         df = yf.download(ticker, start=start, end=end, interval=interval, progress=False, auto_adjust=False)
     else:
@@ -73,7 +72,7 @@ def fetch_msft(period="max", interval="1d", start=None, end=None):
 
     # Keep only date, open, close, high, low, volume (your order)
     df = df[["date", "open", "close", "high", "low", "volume"]]
-    return df, ticker
+    return df
 
 def main():
     p = argparse.ArgumentParser(description="Download USD/JPY historical data (OHLCV) from Yahoo Finance.")
@@ -81,12 +80,13 @@ def main():
     p.add_argument("--interval", default="1d", help="Bar interval (e.g. 1d, 1h, 30m).")
     p.add_argument("--start", help="Start date (YYYY-MM-DD).")
     p.add_argument("--end", help="End date (YYYY-MM-DD).")
+    p.add_argument("--ticker", help="Stock ticker: MSFT, META")
     p.add_argument("--out", default="USDJPY_ohlcv.csv", help="Output CSV path.")
     args = p.parse_args()
 
     # df = fetch_usdjpy(period=args.period, interval=args.interval, start=args.start, end=args.end)
-    df, ticker = fetch_msft(period="5y", interval="1d")
-    df.to_csv(f"{ticker}.csv", index=False)
+    df = fetch_stock(ticker=args.ticker, period=args.period, interval="1d")
+    df.to_csv(f"{args.ticker}.csv", index=False)
     print(f"Saved {len(df):,} rows to {args.out}")
     print(df.head())
 
