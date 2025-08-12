@@ -82,8 +82,8 @@ while idx < len(df):
         entry_price = position['entry_price']
 
         # 止盈止损
-        if current_price >= entry_price * (1 + TP_PERCENT):
-            exit_price = current_price
+        if current_high >= entry_price * (1 + TP_PERCENT):
+            exit_price = current_high
             pnl = (exit_price - entry_price) * position['size']
             cash += exit_price * position['size']
             print(f"[{df.at[idx, 'date']}] TP Hit: entry={entry_price:.2f}, exit={exit_price:.2f}, pnl={pnl:.2f}, cash={cash:.2f}")
