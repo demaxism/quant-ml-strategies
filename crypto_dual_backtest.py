@@ -187,6 +187,9 @@ def backtest_long_only(df: pd.DataFrame,
     cash = initial_cash
     entry_price = None
     entry_time = None
+    entry_bar_idx = None  # 记录进场bar索引
+    stopline_active = False  # 反向止损线激活标志
+    stopline_price = None    # 反向止损线价格
     trades: list[Trade] = []
     exposure_bars = 0
 
@@ -204,6 +207,18 @@ def backtest_long_only(df: pd.DataFrame,
         # record equity at bar open (mark-to-market)
         mtm = cash + (position_size * closes.iloc[i-1] if in_position else 0.0)
         equity_series.append(mtm)
+
+        # 进场后5根K线内，若close低于入场价5%，激活反向止损线
+        if in_position and entry_bar_idx is not None and (i - entry_bar_idx) <= 5 and not stopline_active:
+            if closes.iloc[i] < entry_price * 0.95:
+                stopline_active = True
+                stopline_price = entry_price * 0.98
+
+        # stopline_active时，若high触及止损线，则触发出场
+        stopline_exit = False
+        if in_position and stopline_active and stopline_price is not None:
+            if df["high"].iloc[i] >= stopline_price:
+                stopline_exit = True
 
         # ladder take-profit before strategy exits
         if in_position and tp_ladder and original_size > 0 and entry_price is not None:
@@ -224,7 +239,7 @@ def backtest_long_only(df: pd.DataFrame,
                 tp_next_idx += 1
 
         # exit signal evaluated on bar i-1, executed on bar i open
-        if in_position and df["exit_long"].iloc[i-1] == 1:
+        if in_position and (df["exit_long"].iloc[i-1] == 1 or stopline_exit):
             px = opens.iloc[i] * (1 - fee - slippage)
             cash = cash + position_size * px
             trades[-1].exit_time = dates.iloc[i]
@@ -233,6 +248,9 @@ def backtest_long_only(df: pd.DataFrame,
                                    cash - (initial_cash + sum(t.pnl for t in trades[:-1] if t.pnl is not None)))
             in_position = False
             position_size = 0.0
+            entry_bar_idx = None
+            stopline_active = False
+            stopline_price = None
             # reset TP ladder state
             original_size = 0.0
             tp_levels = []
@@ -249,6 +267,9 @@ def backtest_long_only(df: pd.DataFrame,
                 in_position = True
                 entry_price = float(px)
                 entry_time = dates.iloc[i]
+                entry_bar_idx = i
+                stopline_active = False
+                stopline_price = None
                 # initialize TP ladder for this position
                 original_size = float(size)
                 if tp_ladder and tp_steps > 0 and tp_end > tp_start:
