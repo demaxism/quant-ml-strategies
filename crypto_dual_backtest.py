@@ -331,6 +331,30 @@ def print_summary(res: dict):
     print(f"Exposure (bars)     : {res['exposure_pct']*100:.2f}%")
 
 # -------------------------------
+# CSV trade logging
+# -------------------------------
+
+def trades_to_dataframe(trades: list[Trade]) -> pd.DataFrame:
+    rows = []
+    for t in trades:
+        rows.append({
+            "entry_time": t.entry_time,
+            "exit_time": t.exit_time,
+            "entry_price": t.entry_price,
+            "exit_price": t.exit_price,
+            "size": t.size,
+            "pnl": t.pnl,
+        })
+    return pd.DataFrame(rows)
+
+def save_trades_csv(trades: list[Trade], filepath: str, extra_cols: dict | None = None):
+    df = trades_to_dataframe(trades)
+    if extra_cols:
+        for k, v in extra_cols.items():
+            df[k] = v
+    df.to_csv(filepath, index=False)
+
+# -------------------------------
 # Main
 # -------------------------------
 
@@ -378,6 +402,20 @@ def main():
                              initial_cash=args.initial_cash,
                              strategy_name=name,
                              risk_per_trade=args.risk_per_trade)
+
+    # Save trades to CSV under data/log
+    data_base = os.path.splitext(os.path.basename(args.data))[0]
+    timestamp = pd.Timestamp.now().strftime("%Y-%m-%d_%H-%M-%S")
+    out_csv = f"data/log/trades_{data_base}_{timestamp}.csv"
+    save_trades_csv(res["trades"], out_csv, extra_cols={
+        "strategy": name,
+        "data_file": args.data,
+        "fee": args.fee,
+        "slippage": args.slippage,
+        "initial_cash": args.initial_cash,
+    })
+    print(f"Trade log saved: {out_csv}")
+
     print_summary(res)
 
     if args.plot or args.save_chart:
