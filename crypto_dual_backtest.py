@@ -198,6 +198,7 @@ def backtest_long_only(df: pd.DataFrame,
     tp_next_idx = 0
     tp_fills = 0
     scaled_out_units = 0.0
+    scaled_out_fiat = 0.0
 
     for i in range(1, len(df)):  # start from 1 to have "next open" at i
         # record equity at bar open (mark-to-market)
@@ -214,10 +215,12 @@ def backtest_long_only(df: pd.DataFrame,
                 px = entry_price * (1.0 + level_pct)
                 sell_units = min(position_size, original_size * tp_sell_perc)
                 if sell_units > 0:
-                    cash += sell_units * px * (1.0 - fee - slippage)
+                    net_proceeds = sell_units * px * (1.0 - fee - slippage)
+                    cash += net_proceeds
                     position_size -= sell_units
                     tp_fills += 1
                     scaled_out_units += sell_units
+                    scaled_out_fiat += net_proceeds
                 tp_next_idx += 1
 
         # exit signal evaluated on bar i-1, executed on bar i open
@@ -330,6 +333,7 @@ def backtest_long_only(df: pd.DataFrame,
         "exposure_pct": exposure_pct,
         "tp_fills": tp_fills,
         "scaled_out_units": scaled_out_units,
+        "scaled_out_fiat": scaled_out_fiat,
         "equity_curve": eq,
         "trades": trades_closed,
     }
@@ -377,7 +381,9 @@ def print_summary(res: dict):
     print(f"Exposure (bars)     : {res['exposure_pct']*100:.2f}%")
     if 'tp_fills' in res:
         print(f"TP Fills (ladder)   : {res['tp_fills']}")
-    if 'scaled_out_units' in res:
+    if 'scaled_out_fiat' in res:
+        print(f"Scaled-out Fiat     : {res['scaled_out_fiat']:.2f}")
+    elif 'scaled_out_units' in res:
         print(f"Scaled-out Units    : {res['scaled_out_units']:.6f}")
 
 # -------------------------------
@@ -427,8 +433,8 @@ def main():
     ap.add_argument("--bt-to", type=str, default=None, help="Backtest end date (inclusive, e.g. 2022-01-01)")
     # TP ladder options
     ap.add_argument("--tp-ladder", action="store_true", help="Enable tiered take-profit (scale-out). When enabled, partial sells occur before strategy exits.")
-    ap.add_argument("--tp-start", type=float, default=0.20, help="TP start, as return from entry (e.g., 0.20 for +20%)")
-    ap.add_argument("--tp-end", type=float, default=0.60, help="TP end, as return from entry (e.g., 0.60 for +60%)")
+    ap.add_argument("--tp-start", type=float, default=0.50, help="TP start, as return from entry (e.g., 0.20 for +20%)")
+    ap.add_argument("--tp-end", type=float, default=0.90, help="TP end, as return from entry (e.g., 0.60 for +60%)")
     ap.add_argument("--tp-steps", type=int, default=10, help="Number of TP lines (e.g., 10). Lines at start+step,...,end with step=(end-start)/steps")
     ap.add_argument("--tp-sell-perc", type=float, default=0.10, help="Sell percent of original size per line (e.g., 0.10 means 10% of original units per line)")
     args = ap.parse_args()
