@@ -164,7 +164,12 @@ def backtest_long_only(df: pd.DataFrame,
                        initial_cash: float = 10000.0,
                        strategy_name: str = "turtle",
                        periods_per_year: int = 365*24,  # for 1h use 365*24, for 1d use 252
-                       risk_per_trade: float = 1.0) -> dict:
+                       risk_per_trade: float = 1.0,
+                       tp_ladder: bool = False,
+                       tp_start: float = 0.20,
+                       tp_end: float = 0.60,
+                       tp_steps: int = 10,
+                       tp_sell_perc: float = 0.10) -> dict:
     """
     Simple bar-by-bar simulator:
       - Execute entries at next bar's open * (1 + fee + slippage)
@@ -187,11 +192,33 @@ def backtest_long_only(df: pd.DataFrame,
 
     # Pre-calc returns for Sharpe (equity pct change per bar)
     equity_series = []
+    # TP ladder state
+    original_size = 0.0
+    tp_levels: list[float] = []
+    tp_next_idx = 0
+    tp_fills = 0
+    scaled_out_units = 0.0
 
     for i in range(1, len(df)):  # start from 1 to have "next open" at i
         # record equity at bar open (mark-to-market)
         mtm = cash + (position_size * closes.iloc[i-1] if in_position else 0.0)
         equity_series.append(mtm)
+
+        # ladder take-profit before strategy exits
+        if in_position and tp_ladder and original_size > 0 and entry_price is not None:
+            high_px = df["high"].iloc[i]
+            high_ret = (high_px / entry_price) - 1.0 if entry_price > 0 else -1.0
+            # Process from the next untriggered level; same bar may trigger multiple levels
+            while tp_next_idx < len(tp_levels) and high_ret >= tp_levels[tp_next_idx] and position_size > 0:
+                level_pct = tp_levels[tp_next_idx]
+                px = entry_price * (1.0 + level_pct)
+                sell_units = min(position_size, original_size * tp_sell_perc)
+                if sell_units > 0:
+                    cash += sell_units * px * (1.0 - fee - slippage)
+                    position_size -= sell_units
+                    tp_fills += 1
+                    scaled_out_units += sell_units
+                tp_next_idx += 1
 
         # exit signal evaluated on bar i-1, executed on bar i open
         if in_position and df["exit_long"].iloc[i-1] == 1:
@@ -203,6 +230,10 @@ def backtest_long_only(df: pd.DataFrame,
                                    cash - (initial_cash + sum(t.pnl for t in trades[:-1] if t.pnl is not None)))
             in_position = False
             position_size = 0.0
+            # reset TP ladder state
+            original_size = 0.0
+            tp_levels = []
+            tp_next_idx = 0
 
         # entry signal evaluated on bar i-1, executed on bar i open
         if (not in_position) and df["entry_long"].iloc[i-1] == 1:
@@ -215,6 +246,15 @@ def backtest_long_only(df: pd.DataFrame,
                 in_position = True
                 entry_price = float(px)
                 entry_time = dates.iloc[i]
+                # initialize TP ladder for this position
+                original_size = float(size)
+                if tp_ladder and tp_steps > 0 and tp_end > tp_start:
+                    # Define 10 lines as in spec: step = (end - start) / steps, lines at start+step, ..., end
+                    step = (tp_end - tp_start) / tp_steps
+                    tp_levels = [tp_start + step * k for k in range(1, tp_steps + 1)]
+                else:
+                    tp_levels = []
+                tp_next_idx = 0
                 trades.append(Trade(entry_time=entry_time, exit_time=None,
                                     entry_price=entry_price, exit_price=None,
                                     size=float(size), pnl=None))
@@ -232,6 +272,10 @@ def backtest_long_only(df: pd.DataFrame,
                                cash - (initial_cash + sum(t.pnl for t in trades[:-1] if t.pnl is not None)))
         in_position = False
         position_size = 0.0
+        # reset TP ladder state
+        original_size = 0.0
+        tp_levels = []
+        tp_next_idx = 0
 
     equity_series.append(cash)
     equity_series = pd.Series(equity_series, index=df["date"].iloc[:len(equity_series)])
@@ -284,6 +328,8 @@ def backtest_long_only(df: pd.DataFrame,
         "max_drawdown_bars": mdd_bars,
         "cagr": cagr,
         "exposure_pct": exposure_pct,
+        "tp_fills": tp_fills,
+        "scaled_out_units": scaled_out_units,
         "equity_curve": eq,
         "trades": trades_closed,
     }
@@ -329,6 +375,10 @@ def print_summary(res: dict):
     print(f"Max Drawdown        : {res['max_drawdown']*100:.2f}%")
     print(f"CAGR                : {res['cagr']*100:.2f}%")
     print(f"Exposure (bars)     : {res['exposure_pct']*100:.2f}%")
+    if 'tp_fills' in res:
+        print(f"TP Fills (ladder)   : {res['tp_fills']}")
+    if 'scaled_out_units' in res:
+        print(f"Scaled-out Units    : {res['scaled_out_units']:.6f}")
 
 # -------------------------------
 # CSV trade logging
@@ -375,6 +425,12 @@ def main():
     ap.add_argument("--risk-per-trade", type=float, default=1.0, help="Fraction of cash to allocate per entry [0-1]")
     ap.add_argument("--bt-from", type=str, default=None, help="Backtest start date (inclusive, e.g. 2021-01-01)")
     ap.add_argument("--bt-to", type=str, default=None, help="Backtest end date (inclusive, e.g. 2022-01-01)")
+    # TP ladder options
+    ap.add_argument("--tp-ladder", action="store_true", help="Enable tiered take-profit (scale-out). When enabled, partial sells occur before strategy exits.")
+    ap.add_argument("--tp-start", type=float, default=0.20, help="TP start, as return from entry (e.g., 0.20 for +20%)")
+    ap.add_argument("--tp-end", type=float, default=0.60, help="TP end, as return from entry (e.g., 0.60 for +60%)")
+    ap.add_argument("--tp-steps", type=int, default=10, help="Number of TP lines (e.g., 10). Lines at start+step,...,end with step=(end-start)/steps")
+    ap.add_argument("--tp-sell-perc", type=float, default=0.10, help="Sell percent of original size per line (e.g., 0.10 means 10% of original units per line)")
     args = ap.parse_args()
 
     df = load_ohlcv(args.data, tz=args.tz)
@@ -401,7 +457,12 @@ def main():
                              slippage=args.slippage,
                              initial_cash=args.initial_cash,
                              strategy_name=name,
-                             risk_per_trade=args.risk_per_trade)
+                             risk_per_trade=args.risk_per_trade,
+                             tp_ladder=args.tp_ladder,
+                             tp_start=args.tp_start,
+                             tp_end=args.tp_end,
+                             tp_steps=args.tp_steps,
+                             tp_sell_perc=args.tp_sell_perc)
 
     # Save trades to CSV under data/log
     data_base = os.path.splitext(os.path.basename(args.data))[0]
