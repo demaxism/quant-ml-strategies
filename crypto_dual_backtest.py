@@ -305,6 +305,7 @@ def backtest_long_only(df: pd.DataFrame,
             periods_per_year = int(round((365*24*3600) / dt_seconds))
     sr = sharpe_ratio(rets, periods_per_year=periods_per_year)
     mdd, mdd_bars = max_drawdown(eq)
+    origin_mdd, _ = max_drawdown(df["close"])
 
     # CAGR using timestamps
     if len(eq) >= 2:
@@ -329,6 +330,7 @@ def backtest_long_only(df: pd.DataFrame,
         "sharpe": sr,
         "max_drawdown": mdd,
         "max_drawdown_bars": mdd_bars,
+        "origin_max_drawdown": origin_mdd,
         "cagr": cagr,
         "exposure_pct": exposure_pct,
         "tp_fills": tp_fills,
@@ -377,6 +379,7 @@ def print_summary(res: dict):
     print(f"Win Rate            : {res['win_rate']*100:.2f}%")
     print(f"Sharpe (approx)     : {res['sharpe']:.2f}")
     print(f"Max Drawdown        : {res['max_drawdown']*100:.2f}%")
+    print(f"Origin Price Max DD : {res['origin_max_drawdown']*100:.2f}%")
     print(f"CAGR                : {res['cagr']*100:.2f}%")
     print(f"Exposure (bars)     : {res['exposure_pct']*100:.2f}%")
     if 'tp_fills' in res:
