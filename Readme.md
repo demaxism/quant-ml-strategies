@@ -32,7 +32,6 @@ LSTMでBTCの高値・安値を予測しようとしたが、うまくいかな�
 
 -   結果として、全体的に予測値が「過去の価格帯に引っ張られる」。
 
-* * * * *
   
   <img width="1400" height="600" alt="lstm_predictions_ETH_USDT_4h_turn5" src="https://github.com/user-attachments/assets/10aa7952-f39b-4bc6-b207-f68111ed82c9" />
  [この図では、予測価格が実際の価格よりやや高めに出ている]
@@ -48,11 +47,24 @@ LSTMでBTCの高値・安値を予測しようとしたが、うまくいかな�
 
 ### ✔試してみた：リターン（percentage change）での予測
 
+#### そもそも「percentage change」って？
+
+いわゆる**変化率**のことで、以下のように計算する：
+
+`(current_price - previous_price) / previous_price`
+
+つまり、前回の価格に対してどれだけ上下したかを％で表したもの。\
+価格そのものではなく、**上下の"動き"に注目する**ため、価格のスケールに左右されにくいのがメリット。
+
 #### 結果
 
 -   グラフはかなり改善された。
 
 -   スケールの変動に強くなった感はある。
+
+
+<img width="1400" height="600" alt="lstm_predictions_BTC_USDT_4h_turn1 (1)" src="https://github.com/user-attachments/assets/b6641f58-c130-45f4-a85e-d193fecfccc6" />
+
 
 * * * * *
 
