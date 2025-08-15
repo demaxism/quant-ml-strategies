@@ -14,7 +14,7 @@ The goal is to experiment with and compare these approaches for time series fore
 
 ### 背景
 
-LSTMでBTCの高値・安値を予測しようとしたが、うまくいかない点がいくつかあったので、試行錯誤した内容をメモ。
+LSTMでETHなど仮想通貨の高値・安値を予測しようとしたが、うまくいかない点がいくつかあったので、試行錯誤した内容をメモ。
 
 * * * * *
 
