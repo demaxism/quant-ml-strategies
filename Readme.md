@@ -192,6 +192,10 @@ else:
 
 -   チャ方式で何度もトレーニングして得られた高いバックテスト収益は、検証データへのoverfitting（オーバーフィッティング）である可能性が高い。
 
+エントリーの閾値を上げて取引回数を減らしながら、やっとの思いでこの収益曲線を出せた。前に出たようなワクワクする収益曲線ではないけど、現実的で妥当な結果ではある。
+<img width="1200" height="500" alt="lstm_equity_curve_realtime_ETH_USDT_2025-08-10_11-19-06" src="https://github.com/user-attachments/assets/3dc16121-343f-4cf3-938e-3aa63d400de6" />
+
+
 * * * * *
 
 ### 🔚 結論と次のTODO
