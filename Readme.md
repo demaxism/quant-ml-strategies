@@ -32,9 +32,13 @@ LSTMでBTCの高値・安値を予測しようとしたが、うまくいかな�
 
 -   結果として、全体的に予測値が「過去の価格帯に引っ張られる」。
 
--   [この図では、予測価格が実際の価格よりやや高めに出ている]
+* * * * *
+  
   <img width="1400" height="600" alt="lstm_predictions_ETH_USDT_4h_turn5" src="https://github.com/user-attachments/assets/10aa7952-f39b-4bc6-b207-f68111ed82c9" />
+ [この図では、予測価格が実際の価格よりやや高めに出ている]
 
+ <img width="1400" height="600" alt="lstm_predictions_BTC_USDT_4h_turn1" src="https://github.com/user-attachments/assets/91106e05-194e-49bd-af0e-f4b08bdfc773" />
+ [そしてこちらの図では、予測価格が完全に外れてしまっている…]
 
 #### 対策
 
