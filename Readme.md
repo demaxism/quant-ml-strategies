@@ -111,11 +111,13 @@ LSTMでETHなど仮想通貨の高値・安値を予測しようとしたが、�
 
 まず、使っているLSTMモデルはこんな感じ：
 
-`class LSTMPriceModel(nn.Module):
+```
+class LSTMPriceModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.lstm = nn.LSTM(6, 64, LAYERS, batch_first=True)
         self.fc = nn.Sequential(nn.Linear(64, 64), nn.ReLU(), nn.Linear(64, 2))
+```
 
     def forward(self, x):
         _, (h, _) = self.lstm(x)
@@ -128,16 +130,6 @@ LSTMでETHなど仮想通貨の高値・安値を予測しようとしたが、�
 -   前回より良くならなかったらカウントアップ
 
 -   3エポック連続で改善なし→終了
-
-`# Early stopping logic
-if best_loss - avg_loss > min_delta:
-    best_loss = avg_loss
-    patience_counter = 0
-else:
-    patience_counter += 1
-    if patience_counter >= patience:
-        print(f"Early stopping at epoch {epoch+1}...")
-        break`
 
 * * * * *
 
